@@ -36,6 +36,9 @@ export default function PayablesPage({
   });
   const pendingDeleteRef = useRef(null);
 
+  // Pega a data de hoje no formato YYYY-MM-DD para comparações consistentes
+  const todayStr = useMemo(() => new Date().toLocaleDateString('en-CA'), []);
+
   useEffect(() => {
     let mounted = true;
 
@@ -73,30 +76,21 @@ export default function PayablesPage({
     };
   }, []);
 
+  // FILTRO DE MÊS: Usa split para evitar bug de fuso
   const payablesThisMonth = useMemo(() => {
     return payables.filter((item) => {
-      const dueDate = new Date(item.due_date);
-      if (Number.isNaN(dueDate.getTime())) return false;
-      return dueDate.getMonth() + 1 === month && dueDate.getFullYear() === year;
+      if (!item.due_date) return false;
+      const [itemYear, itemMonth] = item.due_date.split('-').map(Number);
+      return itemMonth === month && itemYear === year;
     });
   }, [payables, month, year]);
 
   const activeFilter = filter ?? FILTERS.all;
 
+  // CONTADOR DE HOJE: Comparação direta de strings
   const dueTodayCount = useMemo(() => {
-    const today = new Date();
-    if (today.getMonth() + 1 !== month || today.getFullYear() !== year) {
-      return 0;
-    }
-    return payablesThisMonth.filter((item) => {
-      const dueDate = new Date(item.due_date);
-      return (
-        dueDate.getDate() === today.getDate() &&
-        dueDate.getMonth() === today.getMonth() &&
-        dueDate.getFullYear() === today.getFullYear()
-      );
-    }).length;
-  }, [payablesThisMonth, month, year]);
+    return payablesThisMonth.filter((item) => item.due_date === todayStr).length;
+  }, [payablesThisMonth, todayStr]);
 
   const formatCurrency = (value) => {
     return value.toLocaleString("pt-BR", {
@@ -199,23 +193,12 @@ export default function PayablesPage({
     }
 
     return items.map((item) => {
-      const dueDate = new Date(item.due_date);
-      const today = new Date();
-      const dueDateOnly = new Date(
-        dueDate.getFullYear(),
-        dueDate.getMonth(),
-        dueDate.getDate()
-      );
-      const todayOnly = new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        today.getDate()
-      );
-      const isDueToday =
-        dueDate.getDate() === today.getDate() &&
-        dueDate.getMonth() === today.getMonth() &&
-        dueDate.getFullYear() === today.getFullYear();
-      const isOverdue = item.status === "PENDING" && dueDateOnly < todayOnly;
+      // Formatação manual para PT-BR sem usar o objeto Date
+      const [yearPart, monthPart, dayPart] = item.due_date.split('-');
+      const formattedDate = `${dayPart}/${monthPart}/${yearPart}`;
+      
+      const isDueToday = item.due_date === todayStr;
+      const isOverdue = item.status === "PENDING" && item.due_date < todayStr;
 
       return (
         <div
@@ -227,7 +210,7 @@ export default function PayablesPage({
           <div>
             <p className="text-sm font-medium text-white">{item.title}</p>
             <p className="text-xs text-slate-400">
-              Vence em {new Date(item.due_date).toLocaleDateString("pt-BR")}
+              Vence em {formattedDate}
             </p>
             {item.category_id && categoryMap.get(item.category_id) && (
               <span
@@ -282,35 +265,22 @@ export default function PayablesPage({
     });
   };
 
+  // Ordenação usando localeCompare para strings ISO
   const pendingPayables = useMemo(() => {
     return payablesThisMonth
       .filter((item) => item.status === "PENDING")
-      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+      .sort((a, b) => a.due_date.localeCompare(b.due_date));
   }, [payablesThisMonth]);
 
   const paidPayables = useMemo(() => {
     return payablesThisMonth
       .filter((item) => item.status === "PAID")
-      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+      .sort((a, b) => a.due_date.localeCompare(b.due_date));
   }, [payablesThisMonth]);
 
   const overduePayables = useMemo(() => {
-    const today = new Date();
-    const todayOnly = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate()
-    );
-    return pendingPayables.filter((item) => {
-      const dueDate = new Date(item.due_date);
-      const dueDateOnly = new Date(
-        dueDate.getFullYear(),
-        dueDate.getMonth(),
-        dueDate.getDate()
-      );
-      return dueDateOnly < todayOnly;
-    });
-  }, [pendingPayables]);
+    return pendingPayables.filter((item) => item.due_date < todayStr);
+  }, [pendingPayables, todayStr]);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-10">
