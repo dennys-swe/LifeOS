@@ -20,6 +20,6 @@ app.include_router(transactions_router)
 app.include_router(categories_router)
 
 
-@app.get("/")
+@app.get("/", methods=["GET", "HEAD"])
 def root():
     return {"status": "ok"}
