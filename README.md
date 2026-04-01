@@ -1,88 +1,68 @@
-# 💰 Controle Financeiro Pessoal (LifeOS - MVP)
+# 💰 LifeOS - Gestão Financeira Inteligente (MVP)
 
-Sistema Fullstack responsivo para gestão financeira. Centraliza a visualização de saldos via importação de extratos e gerencia contas a pagar, com foco total em experiência mobile-first (acesso via iPhone).
-
----
-
-## 🏗️ 1. Arquitetura do Ecossistema
-O projeto opera em um ambiente distribuído para simular um cenário real de produção:
-* **Banco de Dados (Persistence):** PostgreSQL rodando em servidor Linux (Notebook Ubuntu).
-* **Backend (API):** FastAPI rodando em Windows, servindo como ponte de lógica.
-* **Frontend (Interface):** React + Vite + Tailwind CSS (v4) rodando em Windows e acessado via mobile.
-* **Client (Mobile):** Safari no iPhone acessando via rede local (IP fixo).
+Sistema Fullstack responsivo focado em **integridade de dados** e **alta disponibilidade**. Desenvolvido para centralizar o controle de gastos e contas a pagar com uma experiência *mobile-first*.
 
 ---
 
-## 🛠️ 2. Guia de Setup (Desenvolvimento)
+## 🏗️ 1. Arquitetura do Ecossistema (Cloud Native)
 
-### **Backend (PC Windows)**
-1.  **Variáveis de Ambiente (.env):**
-    ```text
-    DATABASE_URL=postgresql+psycopg2://postgres:jala@192.168.0.6:5432/finance_db
-    ```
-2.  **Execução para Acesso na Rede:**
-    ```powershell
-    uvicorn app.main:app --reload --host 0.0.0.0
-    ```
+O projeto evoluiu de um ambiente local para uma infraestrutura distribuída em nuvem, garantindo escalabilidade e acesso global:
 
-### **Frontend (PC Windows)**
-1.  **Dependências:** Node.js v24.14+ | npm v11.11+
-2.  **Configuração da API (`src/services/api.js`):**
-    ```javascript
-    const api = axios.create({ baseURL: "[http://192.168.0.8:8000](http://192.168.0.8:8000)" });
-    ```
-3.  **Execução para Acesso Mobile:**
-    ```powershell
-    npm run dev -- --host
-    ```
+* **Database:** PostgreSQL Serverless hospedado na **Neon.tech**.
+* **Backend:** API FastAPI (Python) hospedada no **Render**.
+* **Frontend:** SPA React + Vite + Tailwind CSS (v4) hospedada na **Vercel**.
+* **Monitoring:** Health checks automatizados via **UptimeRobot** para mitigação de *Cold Start* no Render.
 
 ---
 
-## 📖 3. Status das Funcionalidades (MVP)
+## 🛠️ 2. Destaques de Engenharia (The Jala Way)
 
-### **Dashboard Financeiro** [✅ CONCLUÍDO]
-* Cards de resumo: Saldo Total e Contas a Pagar Pendentes.
-* Lista das 5 últimas transações importadas.
-* Design Dark Mode responsivo.
+Durante o desenvolvimento, foram resolvidos desafios críticos de software para garantir a robustez do sistema:
 
-### **Importação de Extratos (CSV)** [✅ CONCLUÍDO]
-* Página dedicada de Upload com feedback visual.
-* Parser automático para colunas de Data, Descrição e Valor.
-* Redirecionamento automático pós-importação.
-
-### **Controle de Contas a Pagar (Payables)** [🛠️ EM PROGRESSO]
-* API: CRUD funcional via endpoints.
-* UI: Visualização básica no dashboard.
-* **Próximo Passo:** Criar tela de gerenciamento (Dar baixa em contas pelo celular).
+* **Data Integrity (Timezone Fix):** Implementação de lógica de manipulação de datas baseada em strings ISO e processamento via `.split('-')`. Esta abordagem eliminou bugs de fuso horário (GMT) que causavam o deslocamento de datas de vencimento no frontend, garantindo que o dado persistido seja exatamente o exibido.
+* **High Availability (Uptime):** Configuração de rotas de monitoramento compatíveis com o método `HEAD` através de `@app.api_route`. Isso permite que serviços externos de monitoramento mantenham a instância do Render ativa 24/7, reduzindo o tempo de resposta inicial de 20s para < 2s.
+* **CI/CD Pipeline:** Fluxo automatizado de deploy via GitHub. Gestão de múltiplas identidades de commit e resolução de conflitos de histórico para manter o ambiente de produção sempre sincronizado com o repositório principal.
 
 ---
 
-## 📊 4. Modelagem de Dados (Entidades)
+## 📖 3. Status das Funcionalidades
 
-### **Transaction (Extrato)**
-| Campo | Tipo | Descrição |
-| :--- | :--- | :--- |
-| `date` | Date | Data da operação |
-| `description` | String | Nome da transação |
-| `amount` | Numeric | Valor (Positivo para entrada, Negativo para saída) |
-| `source` | String | Nome do arquivo/banco de origem |
+### **Dashboard & Navegação** [✅ CONCLUÍDO]
+* Navegação mensal dinâmica com o componente `MonthNavigator`.
+* Filtros inteligentes por estado: **Pendentes**, **Pagas** e **Atrasadas**.
+* Indicador de contas vencendo no dia atual.
+
+### **Controle de Payables (Contas a Pagar)** [✅ CONCLUÍDO]
+* CRUD completo com persistência no Neon PostgreSQL.
+* Lógica de "Baixa" (Marcar como Pago) com atualização de status em tempo real.
+* Sistema de **Undo** (Desfazer) para exclusões acidentais integrado a notificações *Toast*.
+
+### **Importação de Extratos** [✅ CONCLUÍDO]
+* Parser de CSV com mapeamento dinâmico de colunas (Data, Descrição, Valor).
+* Feedback visual de progresso e redirecionamento automático.
+
+---
+
+## 📊 4. Modelagem de Dados (Entidade Principal)
 
 ### **Payable (Contas a Pagar)**
 | Campo | Tipo | Descrição |
 | :--- | :--- | :--- |
-| `title` | String | Descrição da conta |
-| `due_date` | Date | Vencimento |
-| `status` | Enum | PENDING, PAID, OVERDUE |
+| `title` | String | Descrição amigável da despesa |
+| `due_date` | String (ISO) | Vencimento (YYYY-MM-DD) - **Imune a Timezone** |
+| `amount` | Decimal | Valor monetário da conta |
+| `status` | Enum | `PENDING`, `PAID` |
+| `category_id` | UUID | Relacionamento com a categoria da despesa |
 
 ---
 
 ## 📅 5. Road Map (Próximos Passos)
-1.  **Gestão de Payables na UI:** Criar lista completa de contas a pagar com botão de "Marcar como Pago".
-2.  **Categorização Inteligente:** Lógica para agrupar gastos (ex: "Supermercado", "Lazer").
-3.  **Módulo de Milhas/Cashback:** Adicionar campo para registrar retorno financeiro por transação.
-4.  **PWA Setup:** Adicionar manifest e ícones para instalação "nativa" no iOS.
+
+1.  **Categorização Inteligente:** Lógica para agrupar gastos automaticamente (ex: "Mercado", "Assinaturas").
+2.  **Gráficos de Consumo:** Visualização de gastos por categoria utilizando a biblioteca Recharts.
+3.  **PWA Setup:** Configuração de manifest e service workers para instalação como App nativo no iOS/Android.
+4.  **Módulo de Milhas:** Registro de retorno financeiro (cashback/milhas) por transação paga.
 
 ---
-**Última atualização:** 29/03/2026 - *Ambiente mobile validado no IP 192.168.0.8*
-
-
+**Última atualização:** 31 de Março de 2026
+*Desenvolvido por Dennys Alves como projeto prático de Software Engineering.*
