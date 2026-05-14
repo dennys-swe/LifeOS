@@ -6,6 +6,7 @@ import PayablesPage from "./pages/PayablesPage";
 import RecurringPayablesPage from "./pages/RecurringPayablesPage";
 import CategoryRulesPage from "./pages/CategoryRulesPage";
 import UploadPage from "./pages/UploadPage";
+import BankAccountsPage from "./pages/BankAccountsPage";
 import FabModal from "./components/FabModal";
 import Navbar from "./components/Navbar";
 
@@ -15,6 +16,7 @@ const PAGES = {
   recurring: "recurring",
   rules: "rules",
   upload: "upload",
+  banks: "banks",
 };
 
 export default function App() {
@@ -56,6 +58,7 @@ export default function App() {
         {activePage === PAGES.upload && (
           <UploadPage onNavigate={setActivePage} />
         )}
+        {activePage === PAGES.banks && <BankAccountsPage />}
 
         <FabModal />
       </FinanceProvider>

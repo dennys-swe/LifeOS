@@ -8,6 +8,7 @@ const PAGES = {
   recurring: "recurring",
   rules: "rules",
   upload: "upload",
+  banks: "banks",
 };
 
 const NAV_ITEMS = [
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
   { key: PAGES.recurring, label: "Recorrentes" },
   { key: PAGES.rules, label: "Regras" },
   { key: PAGES.upload, label: "Importar" },
+  { key: PAGES.banks, label: "Bancos" },
 ];
 
 export default function Navbar({ activePage, onNavigate }) {
