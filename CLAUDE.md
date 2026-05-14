@@ -1,96 +1,136 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Este arquivo orienta o Claude Code (claude.ai/code) ao trabalhar neste repositório.
 
-## Project Overview
+## Visão Geral do Projeto
 
-LifeOS is a personal finance management SPA (Contas a Pagar / payables tracker). It is a fullstack app with a FastAPI backend and a React + Vite + Tailwind CSS v4 frontend. Production infrastructure: PostgreSQL on Neon.tech, backend on Render, frontend on Vercel.
+LifeOS é um SPA de gestão financeira pessoal (contas a pagar, transações, orçamento por categoria). Stack: FastAPI no backend e React + Vite + Tailwind CSS v4 no frontend. Infraestrutura de produção: PostgreSQL no Neon.tech, backend no Render, frontend na Vercel.
 
-## Commands
+## Comandos
 
 ### Backend
 
 ```bash
-# Run the dev server (from the backend/ directory)
+# Servidor de desenvolvimento
 uvicorn app.main:app --reload
 
-# Run all tests
+# Rodar todos os testes
 cd backend && pytest
 
-# Run a single test file
-cd backend && pytest tests/test_api_payables.py
+# Rodar um arquivo de teste específico
+cd backend && pytest tests/test_recurring.py
 
-# Run a single test by name
-cd backend && pytest tests/test_api_payables.py -k "test_create_payable"
+# Rodar um teste por nome
+cd backend && pytest tests/test_recurring.py -k "test_generate_no_duplicate"
 
-# Apply database migrations
+# Aplicar migrations
 cd backend && alembic upgrade head
 
-# Create a new migration
-cd backend && alembic revision --autogenerate -m "description"
+# Criar nova migration
+cd backend && alembic revision --autogenerate -m "descricao"
 ```
 
-The backend requires a `.env` file at `backend/.env` with `DATABASE_URL`. Tests use an in-memory SQLite database — no real DB connection needed.
+O backend exige um arquivo `backend/.env` com `DATABASE_URL`. Testes usam SQLite em memória — sem necessidade de banco real.
+
+Para push notifications em produção, adicionar ao `.env`:
+```
+VAPID_PRIVATE_KEY=<chave privada PEM>
+VAPID_PUBLIC_KEY=<chave pública base64url>
+VAPID_CLAIMS_EMAIL=mailto:dennysalvescontato@gmail.com
+```
 
 ### Frontend
 
 ```bash
-# Run the dev server (from the frontend/ directory)
-cd frontend && npm run dev
-
-# Run tests
-cd frontend && npm test
-
-# Lint
-cd frontend && npm run lint
-
-# Build for production
-cd frontend && npm run build
+cd frontend && npm run dev    # servidor de desenvolvimento
+cd frontend && npm test       # vitest
+cd frontend && npm run lint   # eslint
+cd frontend && npm run build  # build de produção
 ```
 
-Frontend reads `VITE_API_URL` from the environment (defaults to `http://localhost:8000`).
+O frontend lê `VITE_API_URL` do ambiente (padrão: `http://localhost:8000`).
 
-## Architecture
+## Arquitetura
 
 ### Backend (`backend/`)
 
-Layered FastAPI app following the pattern: **Router → Service → SQLAlchemy ORM → PostgreSQL**.
+Camadas FastAPI seguindo o padrão: **Router → Service → SQLAlchemy ORM → PostgreSQL**.
 
-- `app/main.py` — FastAPI app setup, CORS, and router registration. The root `GET/HEAD /` route uses `@app.api_route` to support HEAD requests for uptime monitoring.
-- `app/api/endpoints/` — Route handlers for `payables`, `transactions`, and `categories`. Handlers are thin: they validate, call a service function, and return.
-- `app/services/` — Business logic. `payable_service.py` contains filtering, CRUD, and status helpers. `statement_parser.py` parses CSV bank statements.
-- `app/models/` — SQLAlchemy ORM models (`Payable`, `Transaction`, `Category`).
-- `app/schemas/` — Pydantic v2 schemas for request/response validation.
-- `app/db/database.py` — Engine + session factory. Auto-requires SSL for PostgreSQL. `get_db()` is the FastAPI dependency.
-- `alembic/` — Database migrations. The `versions/` directory has two migrations: initial schema and adding categories.
+- `app/main.py` — setup do app, CORS e registro de todos os routers. A rota raiz usa `@app.api_route` para suportar HEAD (uptime monitoring).
+- `app/api/endpoints/` — handlers finos: validam, chamam o service e retornam.
+- `app/services/` — lógica de negócio. Cada domínio tem seu service (`recurring_service`, `reconciliation_service`, `summary_service`, etc.).
+- `app/models/` — ORM SQLAlchemy.
+- `app/schemas/` — schemas Pydantic v2 (usar `model_dump`, `ConfigDict`, `from_attributes=True`).
+- `app/db/database.py` — engine + session factory. SSL automático para PostgreSQL. `get_db()` é a dependency FastAPI.
+- `alembic/versions/` — migrations em ordem cronológica.
 
-**Tests** (`backend/tests/`) use `pytest` with SQLite in-memory via `conftest.py` fixtures that override the `get_db` dependency with a `TestClient`.
+**Testes** (`backend/tests/`) usam `pytest` com SQLite em memória via `conftest.py` que sobrescreve a dependency `get_db` com `TestClient`.
+
+**Compatibilidade SQLite:** `summary_service` agrega em Python (não SQL `GROUP BY`) para funcionar nos testes. Nunca usar `func.date_trunc` ou funções PostgreSQL-only nos services.
+
+**Ordem de registro de rotas:** endpoints com path literal (ex: `/generate`, `/upcoming`, `/notify`) devem ser registrados **antes** de `/{id}` para evitar que o FastAPI interprete strings como UUIDs.
 
 ### Frontend (`frontend/src/`)
 
-Single-page app with manual client-side routing via `activePage` state in `App.jsx` (no React Router).
+SPA com roteamento manual via estado `activePage` em `App.jsx` (sem React Router).
 
-- `App.jsx` — Root component. Owns global state: `activePage`, `refreshKey`, `payablesFilter`, `selectedMonth`, `selectedYear`. Passes these down as props.
-- `pages/PayablesPage.jsx` — Main view. Fetches payables and categories on mount. All date comparisons are done on ISO strings (e.g., `item.due_date.split('-')`, `localeCompare`) to avoid timezone-shifting bugs.
-- `pages/UploadPage.jsx` — CSV bank statement upload flow.
-- `pages/ConnectionPage.jsx` — Dashboard view.
-- `components/FabModal.jsx` — Floating action button that opens a modal to create new payables.
-- `services/api.js` — Axios instance; single source of truth for `VITE_API_URL`.
+- `App.jsx` — componente raiz. Gerencia `activePage`, `payablesFilter`, `selectedMonth`, `selectedYear`. Envolve as páginas com `FinanceProvider`.
+- `context/FinanceContext.jsx` — estado global compartilhado. Faz 3 chamadas em paralelo (`/payables`, `/categories`, `/summary`) e expõe `payables`, `categories`, `summary`, `loading`, `refresh()`. Re-dispara quando `month`, `year` ou `refreshKey` mudam.
+- `pages/PayablesPage.jsx` — lista de contas com filtros, exclusão otimista com undo via toast.
+- `pages/RecurringPayablesPage.jsx` — CRUD de recorrentes + botão "Gerar para este mês".
+- `pages/CategoryRulesPage.jsx` — gerenciamento de regras de categorização (keyword, categoria, prioridade).
+- `pages/UploadPage.jsx` — upload de extrato CSV + UI de revisão de sugestões de conciliação.
+- `pages/ConnectionPage.jsx` — dashboard com cards de saldo, barras de orçamento por categoria e gráfico.
+- `components/FabModal.jsx` — FAB que abre modal para criar payable ou transação.
+- `components/Navbar.jsx` — badge vermelho com contagem de contas vencendo em ≤7 dias.
 
-**Key invariant — date handling:** `due_date` is stored and transported as a plain `YYYY-MM-DD` string. Never construct a `Date` object from it; always use string operations (`.split('-')`, `localeCompare`, direct string comparison) to avoid GMT offset shifting dates by one day.
+**Invariante de datas:** `due_date` trafega e é armazenada como string `YYYY-MM-DD`. **Nunca** construir `new Date(due_date)` — o GMT offset desloca a data um dia. Sempre usar `.split('-')`, `localeCompare` ou comparação direta de strings.
 
-**Delete with Undo:** deletion is optimistic — the item is removed from state immediately and a `setTimeout` (5s) fires the real `DELETE` API call. The Toast's "Desfazer" button cancels the timeout and restores the item to local state without any API call.
+**Exclusão com Undo:** remoção é otimista — item sai do estado imediatamente e um `setTimeout` de 5s dispara o `DELETE` real. O botão "Desfazer" no Toast cancela o timeout e restaura o item sem chamada de API.
 
-### API Endpoints Summary
+**Estado compartilhado:** nunca buscar `/payables` ou `/categories` diretamente dentro de páginas. Usar `useFinance()` do FinanceContext. Chamar `refresh()` após qualquer mutação (create, update, delete, pay).
 
-| Method | Path | Description |
-|--------|------|-------------|
+### Modelos e Domínios
+
+| Modelo | Descrição |
+|---|---|
+| `Payable` | Conta a pagar. FKs nullable: `recurring_payable_id` (ondelete=SET NULL), `transaction_id` (ondelete=SET NULL) |
+| `RecurringPayable` | Template de recorrência (title, amount, day_of_month, active) |
+| `Transaction` | Transação de extrato bancário |
+| `Category` | Categoria com cor (color_hex) |
+| `CategoryRule` | Regra de categorização por keyword (armazenada em UPPERCASE) |
+| `Budget` | Orçamento mensal por categoria. UniqueConstraint(category_id, month, year) |
+| `BankAccount` | Conta bancária (estrutura base; sync retorna 501) |
+| `PushSubscription` | Subscription VAPID para push notifications |
+
+### Lógica de Negócio Crítica
+
+**`generate_for_month` (recurring_service):** para cada `RecurringPayable` ativo, calcula `due_date = date(year, month, min(day_of_month, last_day_of_month))` e cria um `Payable` somente se ainda não existir um com mesmo `recurring_payable_id` no mês (deduplicação).
+
+**`build_keyword_map` (category_rule_service):** retorna `dict[keyword, category_id]` ordenado por `priority DESC`. Usa first-occurrence para preservar a prioridade mais alta quando há duplicatas de keyword.
+
+**`suggest_reconciliation` (reconciliation_service):** para cada transação EXPENSE do upload, busca payables PENDING com `amount` dentro de 5% e `due_date` dentro de ±7 dias. Confidence scoring: 1.0 (exato), 0.8 (valor exato, data ±7d), 0.6 (valor ±5%, data exata), 0.5 (ambos tolerantes).
+
+### Endpoints da API
+
+| Método | Path | Descrição |
+|--------|------|-----------|
 | `GET/HEAD` | `/` | Health check |
-| `GET` | `/payables?month=&year=` | List payables, filtered by month/year |
-| `POST` | `/payables` | Create payable |
-| `PUT` | `/payables/{id}` | Update payable |
-| `PATCH` | `/payables/{id}/pay` | Mark as paid (sets `status=PAID`, `payment_date=today`) |
-| `DELETE` | `/payables/{id}` | Delete payable |
-| `POST` | `/transactions/upload` | Upload CSV bank statement |
-| `GET/POST/DELETE` | `/transactions` | Transaction CRUD |
-| `GET/POST/DELETE` | `/categories` | Category CRUD |
+| `GET` | `/payables?month=&year=` | Lista payables do mês |
+| `POST` | `/payables` | Cria payable |
+| `PUT` | `/payables/{id}` | Atualiza payable |
+| `PATCH` | `/payables/{id}/reconcile?transaction_id=` | Concilia com transação (marca como pago) |
+| `DELETE` | `/payables/{id}` | Remove payable |
+| `GET` | `/payables/upcoming?days=7` | Payables PENDING vencendo nos próximos N dias |
+| `GET/POST/DELETE` | `/recurring-payables` | CRUD de recorrentes |
+| `POST` | `/recurring-payables/generate?month=&year=` | Gera payables do mês a partir dos recorrentes |
+| `POST` | `/transactions/upload` | Upload CSV; retorna `{transactions, suggestions}` |
+| `GET/POST/DELETE` | `/transactions` | CRUD de transações |
+| `GET/POST/DELETE` | `/categories` | CRUD de categorias |
+| `GET/POST/DELETE` | `/category-rules` | CRUD de regras de categorização |
+| `GET` | `/summary?month=&year=` | Totais + by_category + budget_used_pct |
+| `GET/POST/DELETE` | `/budgets?month=&year=` | CRUD de orçamentos |
+| `GET/POST/DELETE` | `/bank-accounts` | CRUD de contas bancárias |
+| `POST` | `/bank-accounts/{id}/sync` | Sync bancário (501 — não implementado) |
+| `POST` | `/push-subscriptions` | Salva subscription VAPID |
+| `POST` | `/push-subscriptions/notify` | Dispara push para contas vencendo em breve |
