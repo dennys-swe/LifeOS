@@ -5,8 +5,7 @@ import ConfirmModal from "../components/ConfirmModal";
 import MonthNavigator from "../components/MonthNavigator";
 import StatusBadge from "../components/StatusBadge";
 import Toast from "../components/Toast";
-
-// Fix: deployment identity and timezone handling
+import { useFinance } from "../context/FinanceContext";
 
 const FILTERS = {
   all: "all",
@@ -15,17 +14,14 @@ const FILTERS = {
 };
 
 export default function PayablesPage({
-  refreshKey,
   filter,
   onFilterChange,
   month,
   year,
   onMonthChange,
 }) {
-  const [payables, setPayables] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [status, setStatus] = useState("idle");
-  const [message, setMessage] = useState("");
+  const { payables: allPayables, categories, refresh } = useFinance();
+  const [errorMessage, setErrorMessage] = useState("");
   const [confirmState, setConfirmState] = useState({
     open: false,
     payableId: null,
@@ -37,38 +33,11 @@ export default function PayablesPage({
     actionLabel: "",
   });
   const pendingDeleteRef = useRef(null);
+  const [optimisticPayables, setOptimisticPayables] = useState(null);
 
-  // Pega a data de hoje no formato YYYY-MM-DD para comparações consistentes
-  const todayStr = useMemo(() => new Date().toLocaleDateString('en-CA'), []);
+  const payables = optimisticPayables ?? allPayables;
 
-  useEffect(() => {
-    let mounted = true;
-
-    const loadData = async () => {
-      setStatus("loading");
-      try {
-        const [payablesResponse, categoriesResponse] = await Promise.all([
-          api.get("/payables", { params: { month, year } }),
-          api.get("/categories"),
-        ]);
-        if (!mounted) return;
-        setPayables(payablesResponse.data ?? []);
-        setCategories(categoriesResponse.data ?? []);
-        setStatus("success");
-        setMessage("");
-      } catch (error) {
-        if (!mounted) return;
-        setStatus("error");
-        setMessage("Falha ao carregar contas.");
-      }
-    };
-
-    loadData();
-
-    return () => {
-      mounted = false;
-    };
-  }, [refreshKey, month, year]);
+  const todayStr = useMemo(() => new Date().toLocaleDateString("en-CA"), []);
 
   useEffect(() => {
     return () => {
@@ -120,9 +89,9 @@ export default function PayablesPage({
     pendingDeleteRef.current = null;
     try {
       await api.delete(`/payables/${id}`);
-    } catch (error) {
-      setStatus("error");
-      setMessage("Falha ao excluir conta.");
+      refresh();
+    } catch {
+      setErrorMessage("Falha ao excluir conta.");
     }
   };
 
@@ -132,8 +101,8 @@ export default function PayablesPage({
     if (confirmState.action === "delete") {
       await finalizePendingDelete();
       const deleted = payables.find((item) => item.id === confirmState.payableId);
-      setPayables((prev) =>
-        prev.filter((item) => item.id !== confirmState.payableId)
+      setOptimisticPayables((prev) =>
+        (prev ?? allPayables).filter((item) => item.id !== confirmState.payableId)
       );
       const timer = setTimeout(() => {
         finalizePendingDelete();
@@ -158,16 +127,9 @@ export default function PayablesPage({
           status: "PAID",
           payment_date: today,
         });
-        setPayables((prev) =>
-          prev.map((item) =>
-            item.id === confirmState.payableId
-              ? { ...item, status: "PAID", payment_date: today }
-              : item
-          )
-        );
-      } catch (error) {
-        setStatus("error");
-        setMessage("Falha ao marcar como pago.");
+        refresh();
+      } catch {
+        setErrorMessage("Falha ao marcar como pago.");
       }
     }
 
@@ -180,7 +142,7 @@ export default function PayablesPage({
     clearTimeout(timer);
     pendingDeleteRef.current = null;
     if (item) {
-      setPayables((prev) => [item, ...prev]);
+      setOptimisticPayables((prev) => [item, ...(prev ?? allPayables)]);
     }
     setToastState({ open: false, message: "", actionLabel: "" });
   };
@@ -343,8 +305,8 @@ export default function PayablesPage({
             </button>
           ))}
         </div>
-        {status === "error" && (
-          <p className="text-sm text-rose-400">{message}</p>
+        {errorMessage && (
+          <p className="text-sm text-rose-400">{errorMessage}</p>
         )}
       </header>
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import api from "../services/api";
+import { useFinance } from "../context/FinanceContext";
 
 const FORM_TYPES = {
   transaction: "transaction",
@@ -25,7 +26,8 @@ const INITIAL_PAYABLE = {
   category_id: "",
 };
 
-export default function FabModal({ onCreated }) {
+export default function FabModal({ onCreated } = {}) {
+  const { refresh } = useFinance() ?? {};
   const [open, setOpen] = useState(false);
   const [formType, setFormType] = useState(FORM_TYPES.payable);
   const [transactionData, setTransactionData] = useState(INITIAL_TRANSACTION);
@@ -46,7 +48,7 @@ export default function FabModal({ onCreated }) {
       try {
         const response = await api.get("/categories");
         setCategories(response.data ?? []);
-      } catch (error) {
+      } catch {
         setCategories([]);
       }
     };
@@ -83,8 +85,9 @@ export default function FabModal({ onCreated }) {
 
       setStatus("success");
       setMessage("Registro adicionado com sucesso!");
+      refresh?.();
       if (onCreated) onCreated();
-    } catch (error) {
+    } catch {
       setStatus("error");
       setMessage("Nao foi possivel salvar. Tente novamente.");
     }
