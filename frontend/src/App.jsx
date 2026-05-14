@@ -1,7 +1,10 @@
 import { useState } from "react";
 
+import { FinanceProvider } from "./context/FinanceContext";
 import ConnectionPage from "./pages/ConnectionPage";
 import PayablesPage from "./pages/PayablesPage";
+import RecurringPayablesPage from "./pages/RecurringPayablesPage";
+import CategoryRulesPage from "./pages/CategoryRulesPage";
 import UploadPage from "./pages/UploadPage";
 import FabModal from "./components/FabModal";
 import Navbar from "./components/Navbar";
@@ -9,49 +12,53 @@ import Navbar from "./components/Navbar";
 const PAGES = {
   dashboard: "dashboard",
   payables: "payables",
+  recurring: "recurring",
+  rules: "rules",
   upload: "upload",
 };
 
 export default function App() {
   const [activePage, setActivePage] = useState(PAGES.dashboard);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [payablesFilter, setPayablesFilter] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
-  const handleRefresh = () => setRefreshKey((prev) => prev + 1);
+  const handleMonthChange = (month, year) => {
+    setSelectedMonth(month);
+    setSelectedYear(year);
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <Navbar activePage={activePage} onNavigate={setActivePage} />
-      {activePage === PAGES.dashboard && (
-        <ConnectionPage
-          refreshKey={refreshKey}
-          month={selectedMonth}
-          year={selectedYear}
-          onMonthChange={(month, year) => {
-            setSelectedMonth(month);
-            setSelectedYear(year);
-          }}
-        />
-      )}
-      {activePage === PAGES.payables && (
-        <PayablesPage
-          refreshKey={refreshKey}
-          filter={payablesFilter}
-          onFilterChange={setPayablesFilter}
-          month={selectedMonth}
-          year={selectedYear}
-          onMonthChange={(month, year) => {
-            setSelectedMonth(month);
-            setSelectedYear(year);
-          }}
-        />
-      )}
-      {activePage === PAGES.upload && (
-        <UploadPage onNavigate={setActivePage} />
-      )}
-      <FabModal onCreated={handleRefresh} />
+      <FinanceProvider month={selectedMonth} year={selectedYear}>
+        <Navbar activePage={activePage} onNavigate={setActivePage} />
+
+        {activePage === PAGES.dashboard && (
+          <ConnectionPage
+            month={selectedMonth}
+            year={selectedYear}
+            onMonthChange={handleMonthChange}
+          />
+        )}
+        {activePage === PAGES.payables && (
+          <PayablesPage
+            filter={payablesFilter}
+            onFilterChange={setPayablesFilter}
+            month={selectedMonth}
+            year={selectedYear}
+            onMonthChange={handleMonthChange}
+          />
+        )}
+        {activePage === PAGES.recurring && (
+          <RecurringPayablesPage month={selectedMonth} year={selectedYear} />
+        )}
+        {activePage === PAGES.rules && <CategoryRulesPage />}
+        {activePage === PAGES.upload && (
+          <UploadPage onNavigate={setActivePage} />
+        )}
+
+        <FabModal />
+      </FinanceProvider>
     </div>
   );
 }

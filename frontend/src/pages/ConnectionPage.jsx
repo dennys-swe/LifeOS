@@ -1,107 +1,28 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-} from "recharts";
+import { useMemo } from "react";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
-import api from "../services/api";
 import MonthNavigator from "../components/MonthNavigator";
+import { useFinance } from "../context/FinanceContext";
 
-const STATUS = {
-  idle: "idle",
-  loading: "loading",
-  success: "success",
-  error: "error",
-};
+const formatCurrency = (value) =>
+  Number(value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-export default function ConnectionPage({ refreshKey, month, year, onMonthChange }) {
-  const [status, setStatus] = useState(STATUS.idle);
-  const [message, setMessage] = useState("");
-  const [payables, setPayables] = useState([]);
-  const [categories, setCategories] = useState([]);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const loadData = async () => {
-      setStatus(STATUS.loading);
-      try {
-        const [payablesResponse, categoriesResponse] = await Promise.all([
-          api.get("/payables", { params: { month, year } }),
-          api.get("/categories"),
-        ]);
-
-        if (!mounted) return;
-
-        setPayables(payablesResponse.data ?? []);
-        setCategories(categoriesResponse.data ?? []);
-        setStatus(STATUS.success);
-        setMessage("Conectado com sucesso");
-      } catch (error) {
-        if (!mounted) return;
-        setStatus(STATUS.error);
-        setMessage("Falha ao conectar com a API");
-      }
-    };
-
-    loadData();
-
-    return () => {
-      mounted = false;
-    };
-  }, [refreshKey, month, year]);
-
-  const payablesThisMonth = payables;
-
-  const totalPending = useMemo(() => {
-    return payablesThisMonth.reduce((acc, item) => {
-      if (item.status !== "PENDING") return acc;
-      return acc + (Number(item.amount) || 0);
-    }, 0);
-  }, [payablesThisMonth]);
-
-  const totalPaid = useMemo(() => {
-    return payablesThisMonth.reduce((acc, item) => {
-      if (item.status !== "PAID") return acc;
-      return acc + (Number(item.amount) || 0);
-    }, 0);
-  }, [payablesThisMonth]);
-
-  const formatCurrency = (value) => {
-    return value.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-  };
-
-  const categoryMap = useMemo(() => {
-    return new Map(categories.map((category) => [category.id, category]));
-  }, [categories]);
+export default function ConnectionPage({ month, year, onMonthChange }) {
+  const { summary, loading } = useFinance();
 
   const chartData = useMemo(() => {
-    const totals = new Map();
-    for (const item of payablesThisMonth) {
-      const key = item.category_id || "uncategorized";
-      const current = totals.get(key) ?? 0;
-      totals.set(key, current + (Number(item.amount) || 0));
-    }
+    if (!summary) return [];
+    return summary.by_category.map((c) => ({
+      name: c.category_name,
+      value: Number(c.total_payables),
+      color: c.color_hex,
+    }));
+  }, [summary]);
 
-    return Array.from(totals.entries()).map(([key, total]) => {
-      if (key === "uncategorized") {
-        return { name: "Sem categoria", value: total, color: "#64748B" };
-      }
-      const category = categoryMap.get(key);
-      return {
-        name: category?.name ?? "Sem categoria",
-        value: total,
-        color: category?.color_hex ?? "#64748B",
-      };
-    });
-  }, [payablesThisMonth, categoryMap]);
-
+  const budgetCategories = useMemo(() => {
+    if (!summary) return [];
+    return summary.by_category.filter((c) => c.budget_limit != null);
+  }, [summary]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -115,52 +36,57 @@ export default function ConnectionPage({ refreshKey, month, year, onMonthChange 
               <h1 className="text-3xl font-semibold text-white md:text-4xl">
                 Controle Financeiro
               </h1>
-              <p className="mt-1 text-slate-400">Visao geral do mes</p>
+              <p className="mt-1 text-slate-400">Visão geral do mês</p>
             </div>
             <div className="rounded-full border border-slate-800 bg-slate-900/70 px-4 py-2 text-sm text-slate-300">
-              {status === STATUS.loading && "Conectando..."}
-              {status === STATUS.success && message}
-              {status === STATUS.error && message}
+              {loading ? "Carregando..." : "Conectado com sucesso"}
             </div>
           </div>
           <MonthNavigator month={month} year={year} onChange={onMonthChange} />
         </header>
 
-        <section className="grid gap-4 md:grid-cols-2">
+        {/* Cards principais */}
+        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-6 shadow-xl">
-            <p className="text-sm text-slate-400">Total Pendente no Mes</p>
-            <p className="mt-4 text-3xl font-semibold text-amber-400 md:text-4xl">
-              {formatCurrency(totalPending)}
+            <p className="text-sm text-slate-400">Saldo do Mês</p>
+            <p className={`mt-4 text-2xl font-semibold md:text-3xl ${Number(summary?.balance ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              {formatCurrency(summary?.balance ?? 0)}
             </p>
-            <p className="mt-2 text-xs text-slate-500">
-              Somatorio de contas pendentes no mes selecionado
-            </p>
+            <p className="mt-2 text-xs text-slate-500">Entradas - Saídas</p>
           </div>
           <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-6 shadow-xl">
-            <p className="text-sm text-slate-400">Total Ja Pago</p>
-            <p className="mt-4 text-3xl font-semibold text-emerald-400 md:text-4xl">
-              {formatCurrency(totalPaid)}
+            <p className="text-sm text-slate-400">Entradas</p>
+            <p className="mt-4 text-2xl font-semibold text-emerald-400 md:text-3xl">
+              {formatCurrency(summary?.total_income ?? 0)}
             </p>
-            <p className="mt-2 text-xs text-slate-500">
-              Somatorio de contas pagas no mes selecionado
+            <p className="mt-2 text-xs text-slate-500">Transações do mês</p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-6 shadow-xl">
+            <p className="text-sm text-slate-400">Total Pendente</p>
+            <p className="mt-4 text-2xl font-semibold text-amber-400 md:text-3xl">
+              {formatCurrency(summary?.total_pending ?? 0)}
             </p>
+            <p className="mt-2 text-xs text-slate-500">Contas a pagar no mês</p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-6 shadow-xl">
+            <p className="text-sm text-slate-400">Total Pago</p>
+            <p className="mt-4 text-2xl font-semibold text-emerald-400 md:text-3xl">
+              {formatCurrency(summary?.total_paid ?? 0)}
+            </p>
+            <p className="mt-2 text-xs text-slate-500">Contas pagas no mês</p>
           </div>
         </section>
 
+        {/* Gráfico por categoria */}
         <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <h2 className="text-lg font-semibold text-white">
-              Payables por categoria
-            </h2>
-            <p className="text-sm text-slate-400">
-              Distribuicao do mes selecionado
-            </p>
+            <h2 className="text-lg font-semibold text-white">Payables por categoria</h2>
+            <p className="text-sm text-slate-400">Distribuição do mês selecionado</p>
           </div>
-
           <div className="mt-6 h-72">
             {chartData.length === 0 ? (
               <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-700 text-slate-400">
-                Nenhuma conta encontrada para este mes.
+                Nenhuma conta encontrada para este mês.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
@@ -192,6 +118,36 @@ export default function ConnectionPage({ refreshKey, month, year, onMonthChange 
             )}
           </div>
         </section>
+
+        {/* Orçamento por categoria */}
+        {budgetCategories.length > 0 && (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
+            <h2 className="mb-4 text-lg font-semibold text-white">Orçamento por Categoria</h2>
+            <div className="flex flex-col gap-4">
+              {budgetCategories.map((c) => {
+                const pct = Math.min(c.budget_used_pct ?? 0, 100);
+                const overBudget = (c.budget_used_pct ?? 0) > 100;
+                return (
+                  <div key={c.category_id ?? c.category_name}>
+                    <div className="mb-1 flex items-center justify-between text-sm">
+                      <span className="font-medium text-white">{c.category_name}</span>
+                      <span className={overBudget ? "text-rose-400" : "text-slate-300"}>
+                        {formatCurrency(c.total_payables)} / {formatCurrency(c.budget_limit)}
+                        {overBudget && " ⚠ Estourado"}
+                      </span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                      <div
+                        className={`h-2 rounded-full transition-all ${overBudget ? "bg-rose-500" : "bg-emerald-500"}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

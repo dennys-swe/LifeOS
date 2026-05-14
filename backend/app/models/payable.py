@@ -31,5 +31,13 @@ class Payable(Base):
     category_id: Mapped[Uuid | None] = mapped_column(
         Uuid, ForeignKey("categories.id"), nullable=True
     )
+    recurring_payable_id: Mapped[Uuid | None] = mapped_column(
+        Uuid, ForeignKey("recurring_payables.id", ondelete="SET NULL"), nullable=True
+    )
+    transaction_id: Mapped[Uuid | None] = mapped_column(
+        Uuid, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True
+    )
 
     category = relationship("Category", back_populates="payables")
+    recurring_payable = relationship("RecurringPayable", back_populates="payables")
+    transaction = relationship("Transaction")
