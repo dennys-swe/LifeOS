@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -11,6 +12,24 @@ from app.schemas.bank_account import BankAccountCreate, BankAccountResponse
 from app.services import bank_sync_service
 
 router = APIRouter(prefix="/bank-accounts", tags=["Bank Accounts"])
+
+
+class ConnectTokenResponse(BaseModel):
+    access_token: str
+
+
+class SyncResponse(BaseModel):
+    imported: int
+    skipped: int
+
+
+@router.post("/connect-token", response_model=ConnectTokenResponse)
+def create_connect_token(item_id: Optional[UUID] = None):
+    try:
+        token = bank_sync_service.get_connect_token(item_id=item_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"access_token": token}
 
 
 @router.get("", response_model=List[BankAccountResponse])
@@ -32,12 +51,15 @@ def delete_bank_account(account_id: UUID, db: Session = Depends(get_db)):
     return None
 
 
-@router.post("/{account_id}/sync", status_code=status.HTTP_501_NOT_IMPLEMENTED)
+@router.post("/{account_id}/sync", response_model=SyncResponse)
 def sync_bank_account(account_id: UUID, db: Session = Depends(get_db)):
     account = bank_sync_service.get_account(db, account_id)
     if account is None:
         raise HTTPException(status_code=404, detail="Bank account not found")
-    return {
-        "detail": "Bank sync not yet configured. Pluggy/Open Finance integration is planned for a future release.",
-        "account_id": str(account_id),
-    }
+    try:
+        result = bank_sync_service.sync_account(db, account)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Erro ao sincronizar com Pluggy: {exc}")
+    return result
