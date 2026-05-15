@@ -14,7 +14,7 @@ function loadPluggyScript() {
   });
 }
 
-export default function BankAccountsPage() {
+export default function BankAccountsPage({ onNavigateUpload }) {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(null);
@@ -90,48 +90,59 @@ export default function BankAccountsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-10">
-        <header className="flex items-end justify-between">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-8">
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.4em] text-slate-500">Open Finance</p>
-            <h1 className="text-3xl font-semibold text-white">Contas Bancárias</h1>
+            <p className="text-xs font-medium uppercase tracking-widest text-gray-400 dark:text-slate-500">Open Finance</p>
+            <h1 className="mt-1 text-2xl font-semibold text-gray-900 dark:text-slate-100">Contas Bancárias</h1>
           </div>
-          <button
-            type="button"
-            onClick={handleConnect}
-            disabled={connecting}
-            className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
-          >
-            {connecting ? "Aguardando..." : "+ Conectar banco"}
-          </button>
+          <div className="flex gap-2">
+            {onNavigateUpload && (
+              <button
+                type="button"
+                onClick={onNavigateUpload}
+                className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
+              >
+                Importar CSV
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleConnect}
+              disabled={connecting}
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {connecting ? "Aguardando..." : "+ Conectar banco"}
+            </button>
+          </div>
         </header>
 
         {message && (
-          <div className={`rounded-xl px-4 py-3 text-sm ${message.type === "ok" ? "bg-emerald-900/40 text-emerald-300" : "bg-rose-900/40 text-rose-300"}`}>
+          <div className={`rounded-xl px-4 py-3 text-sm ${message.type === "ok" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-rose-50 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300"}`}>
             {message.text}
           </div>
         )}
 
         {loading ? (
-          <p className="text-slate-400">Carregando...</p>
+          <p className="text-gray-400 dark:text-slate-400">Carregando...</p>
         ) : accounts.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center">
-            <p className="text-slate-400">Nenhuma conta conectada.</p>
-            <p className="mt-1 text-sm text-slate-600">Clique em "+ Conectar banco" para começar.</p>
+          <div className="rounded-2xl border border-dashed border-gray-200 p-12 text-center dark:border-slate-700">
+            <p className="text-gray-500 dark:text-slate-400">Nenhuma conta conectada.</p>
+            <p className="mt-1 text-sm text-gray-400 dark:text-slate-600">Clique em "+ Conectar banco" para começar.</p>
           </div>
         ) : (
           <ul className="flex flex-col gap-3">
             {accounts.map((acct) => (
               <li
                 key={acct.id}
-                className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-900 px-5 py-4"
+                className="flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900"
               >
                 <div>
-                  <p className="font-medium text-white">{acct.name}</p>
-                  <p className="text-sm text-slate-400">{acct.bank_name}</p>
+                  <p className="font-medium text-gray-900 dark:text-slate-100">{acct.name}</p>
+                  <p className="text-sm text-gray-500 dark:text-slate-400">{acct.bank_name}</p>
                   {acct.last_sync_at && (
-                    <p className="mt-1 text-xs text-slate-600">
+                    <p className="mt-1 text-xs text-gray-400 dark:text-slate-600">
                       Última sync: {new Date(acct.last_sync_at).toLocaleString("pt-BR")}
                     </p>
                   )}
@@ -141,7 +152,7 @@ export default function BankAccountsPage() {
                     type="button"
                     onClick={() => handleSync(acct)}
                     disabled={syncing === acct.id || !acct.external_id}
-                    className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-slate-600 disabled:opacity-40"
+                    className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-100 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     title={!acct.external_id ? "Conecte o banco primeiro" : "Importar transações"}
                   >
                     {syncing === acct.id ? "Sincronizando..." : "Sincronizar"}
@@ -149,7 +160,7 @@ export default function BankAccountsPage() {
                   <button
                     type="button"
                     onClick={() => handleDelete(acct)}
-                    className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-rose-400 transition hover:bg-rose-900/30"
+                    className="rounded-lg px-3 py-1.5 text-xs font-medium text-rose-500 transition hover:bg-rose-50 dark:hover:bg-rose-900/20"
                   >
                     Remover
                   </button>

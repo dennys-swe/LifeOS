@@ -18,21 +18,21 @@ export default function MonthNavigator({ month, year, onChange }) {
   };
 
   return (
-    <div className="flex items-center gap-3 text-sm text-slate-300">
+    <div className="flex items-center gap-2 text-sm">
       <button
         type="button"
         onClick={handlePrev}
-        className="rounded-full border border-slate-700 px-3 py-1 hover:bg-slate-900"
+        className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-900"
       >
         &lt;
       </button>
-      <span className="min-w-[140px] text-center font-semibold text-slate-100">
+      <span className="min-w-[140px] text-center font-semibold text-gray-800 capitalize dark:text-slate-200">
         {label}
       </span>
       <button
         type="button"
         onClick={handleNext}
-        className="rounded-full border border-slate-700 px-3 py-1 hover:bg-slate-900"
+        className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-900"
       >
         &gt;
       </button>

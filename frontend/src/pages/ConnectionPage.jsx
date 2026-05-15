@@ -1,29 +1,80 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Bar,
-  BarChart,
-  Cell,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
+  Bar, BarChart, Cell, Legend, Pie, PieChart,
+  ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 
 import MonthNavigator from "../components/MonthNavigator";
 import { useFinance } from "../context/FinanceContext";
+import { useTheme } from "../context/ThemeContext";
 import api from "../services/api";
 
-const fmt = (value) =>
-  Number(value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const fmt = (v) =>
+  Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+const fmtShort = (v) => {
+  const n = Number(v);
+  if (Math.abs(n) >= 1000) return `R$${(n / 1000).toFixed(1)}k`;
+  return `R$${n.toFixed(0)}`;
+};
 
 const MONTH_LABELS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
+function delta(curr, prev) {
+  if (!prev || Number(prev) === 0) return null;
+  return ((Number(curr) - Number(prev)) / Math.abs(Number(prev))) * 100;
+}
+
+function DeltaBadge({ pct, invertColor = false }) {
+  if (pct === null) return null;
+  const positive = pct > 0;
+  const good = invertColor ? !positive : positive;
+  const color = good
+    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+    : "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400";
+  return (
+    <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-semibold ${color}`}>
+      {positive ? "↑" : "↓"} {Math.abs(pct).toFixed(1)}%
+    </span>
+  );
+}
+
+function StatCard({ label, value, prevValue, subtitle, valueColor, invertDelta }) {
+  const pct = delta(value, prevValue);
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <p className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-slate-500">{label}</p>
+      <p className={`mt-3 text-2xl font-semibold ${valueColor ?? "text-gray-900 dark:text-slate-100"}`}>
+        {fmt(value ?? 0)}
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        {pct !== null && <DeltaBadge pct={pct} invertColor={invertDelta} />}
+        <p className="text-xs text-gray-400 dark:text-slate-500">{subtitle}</p>
+      </div>
+    </div>
+  );
+}
+
+function DonutCenter({ cx, cy, total }) {
+  return (
+    <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle">
+      <tspan x={cx} dy="-8" className="fill-gray-500 dark:fill-slate-400" fontSize={11}>Total</tspan>
+      <tspan x={cx} dy="20" className="fill-gray-900 dark:fill-slate-100" fontSize={14} fontWeight={600}>
+        {fmtShort(total)}
+      </tspan>
+    </text>
+  );
+}
+
 export default function ConnectionPage({ month, year, onMonthChange }) {
   const { summary, payables, loading } = useFinance();
+  const { dark } = useTheme();
+  const [prevSummary, setPrevSummary] = useState(null);
   const [upcoming, setUpcoming] = useState([]);
   const [history, setHistory] = useState([]);
-  const [bankAccounts, setBankAccounts] = useState([]);
+
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
 
   useEffect(() => {
     api.get("/payables/upcoming?days=7")
@@ -33,11 +84,13 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
     api.get("/summary/history?months=6")
       .then((r) => setHistory(r.data?.months ?? []))
       .catch(() => setHistory([]));
-
-    api.get("/bank-accounts")
-      .then((r) => setBankAccounts(r.data ?? []))
-      .catch(() => setBankAccounts([]));
   }, []);
+
+  useEffect(() => {
+    api.get("/summary", { params: { month: prevMonth, year: prevYear } })
+      .then((r) => setPrevSummary(r.data ?? null))
+      .catch(() => setPrevSummary(null));
+  }, [prevMonth, prevYear]);
 
   const todayStr = useMemo(() => new Date().toLocaleDateString("en-CA"), []);
 
@@ -57,18 +110,38 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
   const totalCount = payablesThisMonth.length;
   const progressPct = totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0;
 
-  const categoryChartData = useMemo(() => {
+  const donutData = useMemo(() => {
     if (!summary) return [];
     return summary.by_category
       .filter((c) => Number(c.total_payables) > 0)
       .slice(0, 8)
       .map((c) => ({
-        name: c.category_name.length > 14 ? c.category_name.slice(0, 13) + "…" : c.category_name,
-        fullName: c.category_name,
+        name: c.category_name,
         value: Number(c.total_payables),
         color: c.color_hex,
       }));
   }, [summary]);
+
+  const totalExpenses = useMemo(
+    () => donutData.reduce((s, c) => s + c.value, 0),
+    [donutData]
+  );
+
+  const categoryTableData = useMemo(() => {
+    if (!summary) return [];
+    const prevMap = new Map(
+      (prevSummary?.by_category ?? []).map((c) => [c.category_name, c])
+    );
+    return summary.by_category
+      .filter((c) => Number(c.total_payables) > 0)
+      .map((c) => {
+        const prev = prevMap.get(c.category_name);
+        const pct = delta(c.total_payables, prev?.total_payables);
+        const barPct = totalExpenses > 0 ? (Number(c.total_payables) / totalExpenses) * 100 : 0;
+        return { ...c, deltaPct: pct, barPct, prevAmount: prev?.total_payables ?? null };
+      })
+      .sort((a, b) => Number(b.total_payables) - Number(a.total_payables));
+  }, [summary, prevSummary, totalExpenses]);
 
   const historyChartData = useMemo(() =>
     history.map((m) => ({
@@ -79,222 +152,261 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
     [history]
   );
 
-  const overdueItems = useMemo(
-    () => upcoming.filter((p) => p.due_date < todayStr),
+  const overdueCount = useMemo(
+    () => upcoming.filter((p) => p.due_date < todayStr).length,
     [upcoming, todayStr]
   );
 
-  const formatDueDate = (dateStr) => {
-    const [y, m, d] = dateStr.split("-");
-    return `${d}/${m}/${y}`;
+  const tooltipStyle = {
+    backgroundColor: dark ? "#0f172a" : "#ffffff",
+    border: `1px solid ${dark ? "#334155" : "#e2e8f0"}`,
+    borderRadius: "12px",
+    color: dark ? "#e2e8f0" : "#0f172a",
   };
 
-  const customBarLabel = ({ x, y, width, value }) => {
-    if (!value) return null;
-    return (
-      <text x={x + width + 6} y={y + 11} fill="#94a3b8" fontSize={11}>
-        {fmt(value)}
-      </text>
-    );
-  };
+  const axisTickColor = dark ? "#64748b" : "#94a3b8";
+  const axisMutedColor = dark ? "#475569" : "#cbd5e1";
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
 
         {/* Header */}
-        <header className="flex flex-col gap-3">
-          <p className="text-xs uppercase tracking-[0.4em] text-slate-500">Dashboard Financeiro</p>
-          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-            <h1 className="text-3xl font-semibold text-white md:text-4xl">Controle Financeiro</h1>
-            {overdueItems.length > 0 && (
-              <div className="flex items-center gap-2 rounded-full border border-rose-500/40 bg-rose-900/20 px-4 py-2 text-sm text-rose-300">
-                <span className="h-2 w-2 rounded-full bg-rose-400" />
-                {overdueItems.length} conta{overdueItems.length > 1 ? "s" : ""} vencida{overdueItems.length > 1 ? "s" : ""}
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-widest text-gray-400 dark:text-slate-500">
+              Dashboard Financeiro
+            </p>
+            <h1 className="mt-1 text-2xl font-semibold text-gray-900 dark:text-slate-100">
+              Controle Financeiro
+            </h1>
+          </div>
+          <div className="flex items-center gap-3">
+            {overdueCount > 0 && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                {overdueCount} vencida{overdueCount > 1 ? "s" : ""}
+              </span>
+            )}
+            <MonthNavigator month={month} year={year} onChange={onMonthChange} />
+          </div>
+        </header>
+
+        {/* Stat cards */}
+        {loading ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-28 animate-pulse rounded-2xl bg-gray-200 dark:bg-slate-800" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="Saldo"
+              value={summary?.balance}
+              prevValue={prevSummary?.balance}
+              subtitle="vs mês anterior"
+              valueColor={Number(summary?.balance ?? 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}
+            />
+            <StatCard
+              label="Entradas"
+              value={summary?.total_income}
+              prevValue={prevSummary?.total_income}
+              subtitle="vs mês anterior"
+              valueColor="text-emerald-600 dark:text-emerald-400"
+            />
+            <StatCard
+              label="Pendente"
+              value={summary?.total_pending}
+              prevValue={prevSummary?.total_pending}
+              subtitle="vs mês anterior"
+              valueColor="text-amber-600 dark:text-amber-400"
+              invertDelta
+            />
+            <StatCard
+              label="Pago"
+              value={summary?.total_paid}
+              prevValue={prevSummary?.total_paid}
+              subtitle="vs mês anterior"
+              valueColor="text-gray-900 dark:text-slate-100"
+            />
+          </div>
+        )}
+
+        {/* Middle row: donut + upcoming */}
+        <div className="grid gap-6 lg:grid-cols-5">
+
+          {/* Donut + category list */}
+          <div className="lg:col-span-3 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-slate-100">Gastos por categoria</h2>
+              <p className="text-xs text-gray-400 dark:text-slate-500">mês selecionado</p>
+            </div>
+            {donutData.length === 0 ? (
+              <div className="flex h-48 items-center justify-center text-sm text-gray-400 dark:text-slate-500">
+                Nenhum gasto registrado.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+                {/* Donut */}
+                <div className="flex-shrink-0 self-center">
+                  <ResponsiveContainer width={180} height={180}>
+                    <PieChart>
+                      <Pie
+                        data={donutData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={54}
+                        outerRadius={82}
+                        paddingAngle={2}
+                        dataKey="value"
+                        startAngle={90}
+                        endAngle={-270}
+                        strokeWidth={0}
+                      >
+                        {donutData.map((entry) => (
+                          <Cell key={entry.name} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <DonutCenter cx={90} cy={90} total={totalExpenses} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Legend list */}
+                <div className="flex flex-1 flex-col gap-2 min-w-0">
+                  {donutData.map((c) => (
+                    <div key={c.name} className="flex items-center gap-2">
+                      <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: c.color }} />
+                      <span className="flex-1 truncate text-sm text-gray-700 dark:text-slate-300">{c.name}</span>
+                      <span className="text-sm font-medium text-gray-900 dark:text-slate-100">{fmt(c.value)}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
-          <MonthNavigator month={month} year={year} onChange={onMonthChange} />
-        </header>
 
-        {/* Cards de resumo */}
-        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-6 shadow-xl">
-            <p className="text-sm text-slate-400">Saldo</p>
-            <p className={`mt-4 text-2xl font-semibold md:text-3xl ${Number(summary?.balance ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              {fmt(summary?.balance ?? 0)}
-            </p>
-            <p className="mt-2 text-xs text-slate-500">Entradas − Saídas</p>
-          </div>
-          <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-6 shadow-xl">
-            <p className="text-sm text-slate-400">Entradas</p>
-            <p className="mt-4 text-2xl font-semibold text-emerald-400 md:text-3xl">
-              {fmt(summary?.total_income ?? 0)}
-            </p>
-            <p className="mt-2 text-xs text-slate-500">Transações do mês</p>
-          </div>
-          <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-6 shadow-xl">
-            <p className="text-sm text-slate-400">Pendente</p>
-            <p className="mt-4 text-2xl font-semibold text-amber-400 md:text-3xl">
-              {fmt(summary?.total_pending ?? 0)}
-            </p>
-            <p className="mt-2 text-xs text-slate-500">Contas a pagar</p>
-          </div>
-          <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-6 shadow-xl">
-            <p className="text-sm text-slate-400">Pago</p>
-            <p className="mt-4 text-2xl font-semibold text-emerald-400 md:text-3xl">
-              {fmt(summary?.total_paid ?? 0)}
-            </p>
-            <p className="mt-2 text-xs text-slate-500">Contas pagas</p>
-          </div>
-        </section>
-
-        {/* Progresso do mês + Contas bancárias */}
-        <section className="grid gap-4 md:grid-cols-2">
-          {/* Progresso */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
-            <h2 className="mb-4 text-base font-semibold text-white">Progresso do mês</h2>
-            {loading ? (
-              <p className="text-sm text-slate-400">Carregando...</p>
-            ) : (
-              <>
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="text-slate-300">{paidCount} de {totalCount} contas pagas</span>
-                  <span className={`font-semibold ${progressPct === 100 ? "text-emerald-400" : "text-amber-400"}`}>
-                    {progressPct}%
-                  </span>
-                </div>
-                <div className="h-3 w-full overflow-hidden rounded-full bg-slate-800">
-                  <div
-                    className={`h-3 rounded-full transition-all duration-500 ${progressPct === 100 ? "bg-emerald-500" : "bg-amber-500"}`}
-                    style={{ width: `${progressPct}%` }}
-                  />
-                </div>
-                {totalCount === 0 && (
-                  <p className="mt-3 text-xs text-slate-500">Nenhuma conta neste mês.</p>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Contas bancárias */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
-            <h2 className="mb-4 text-base font-semibold text-white">Contas bancárias</h2>
-            {bankAccounts.length === 0 ? (
-              <p className="text-sm text-slate-500">Nenhuma conta conectada.</p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {bankAccounts.map((acct) => (
-                  <li key={acct.id} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-300">{acct.name}</span>
-                    <span className="text-xs text-slate-500">{acct.bank_name}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </section>
-
-        {/* Contas vencendo em breve */}
-        {upcoming.length > 0 && (
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
-            <h2 className="mb-4 text-base font-semibold text-white">
-              Vencendo nos próximos 7 dias
-              <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">
-                {upcoming.length}
-              </span>
-            </h2>
-            <div className="flex flex-col gap-2">
-              {upcoming.slice(0, 6).map((p) => {
-                const isOverdue = p.due_date < todayStr;
-                return (
-                  <div key={p.id} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
-                    <div>
-                      <p className="text-sm font-medium text-white">{p.title}</p>
-                      <p className={`text-xs ${isOverdue ? "text-rose-400" : "text-slate-400"}`}>
-                        {isOverdue ? "Venceu em " : "Vence em "}{formatDueDate(p.due_date)}
-                      </p>
-                    </div>
-                    <p className={`text-sm font-semibold ${isOverdue ? "text-rose-400" : "text-amber-400"}`}>
-                      {fmt(Number(p.amount))}
-                    </p>
-                  </div>
-                );
-              })}
+          {/* Upcoming + progress */}
+          <div className="flex flex-col gap-4 lg:col-span-2">
+            {/* Progress */}
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-slate-100">Progresso do mês</h2>
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className="text-gray-500 dark:text-slate-400">{paidCount} de {totalCount} pagas</span>
+                <span className={`font-semibold ${progressPct === 100 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                  {progressPct}%
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-slate-800">
+                <div
+                  className={`h-2 rounded-full transition-all duration-500 ${progressPct === 100 ? "bg-emerald-500" : "bg-amber-500"}`}
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
             </div>
-          </section>
-        )}
 
-        {/* Histórico 6 meses */}
+            {/* Upcoming bills */}
+            <div className="flex-1 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-slate-100">
+                Vencendo em breve
+                {upcoming.length > 0 && (
+                  <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-400">
+                    {upcoming.length}
+                  </span>
+                )}
+              </h2>
+              {upcoming.length === 0 ? (
+                <p className="text-sm text-gray-400 dark:text-slate-500">Nenhuma conta vencendo nos próximos 7 dias.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {upcoming.slice(0, 5).map((p) => {
+                    const [, m, d] = p.due_date.split("-");
+                    const overdue = p.due_date < todayStr;
+                    return (
+                      <div key={p.id} className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-gray-800 dark:text-slate-200">{p.title}</p>
+                          <p className={`text-xs ${overdue ? "text-rose-500 dark:text-rose-400" : "text-gray-400 dark:text-slate-500"}`}>
+                            {overdue ? "Venceu " : ""}{d}/{m}
+                          </p>
+                        </div>
+                        <span className={`flex-shrink-0 text-sm font-semibold ${overdue ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>
+                          {fmt(p.amount)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* 6-month bar chart */}
         {historyChartData.length > 0 && (
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
-            <h2 className="mb-1 text-lg font-semibold text-white">Histórico dos últimos 6 meses</h2>
-            <p className="mb-6 text-sm text-slate-400">Entradas vs Despesas</p>
-            <div className="h-64">
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h2 className="mb-1 text-sm font-semibold text-gray-900 dark:text-slate-100">Histórico — últimos 6 meses</h2>
+            <p className="mb-5 text-xs text-gray-400 dark:text-slate-500">Entradas vs Despesas</p>
+            <div className="h-52">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={historyChartData} barGap={4}>
-                  <XAxis dataKey="label" tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
-                  <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} width={56} />
+                  <XAxis dataKey="label" tick={{ fill: axisTickColor, fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={fmtShort} tick={{ fill: axisMutedColor, fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
                   <Tooltip
                     formatter={(v, name) => [fmt(v), name]}
-                    contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "12px" }}
-                    labelStyle={{ color: "#e2e8f0" }}
-                    itemStyle={{ color: "#e2e8f0" }}
+                    contentStyle={tooltipStyle}
+                    labelStyle={{ color: dark ? "#e2e8f0" : "#0f172a" }}
+                    itemStyle={{ color: dark ? "#e2e8f0" : "#374151" }}
                   />
-                  <Legend wrapperStyle={{ color: "#94a3b8", fontSize: 13 }} />
-                  <Bar dataKey="Entradas" fill="#34d399" radius={[4, 4, 0, 0]} maxBarSize={32} />
-                  <Bar dataKey="Despesas" fill="#f87171" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                  <Legend wrapperStyle={{ color: axisTickColor, fontSize: 12 }} />
+                  <Bar dataKey="Entradas" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                  <Bar dataKey="Despesas" fill="#f87171" radius={[4, 4, 0, 0]} maxBarSize={28} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </section>
+          </div>
         )}
 
-        {/* Gastos por categoria — BarChart horizontal */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
-          <div className="mb-6 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-            <h2 className="text-lg font-semibold text-white">Gastos por categoria</h2>
-            <p className="text-sm text-slate-400">Contas do mês selecionado</p>
+        {/* Category table with delta */}
+        {categoryTableData.length > 0 && (
+          <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-slate-800">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-slate-100">Principais categorias</h2>
+              <p className="text-xs text-gray-400 dark:text-slate-500">vs mês anterior</p>
+            </div>
+            <div className="divide-y divide-gray-50 dark:divide-slate-800/60">
+              {categoryTableData.map((c) => (
+                <div key={c.category_name} className="flex items-center gap-4 px-6 py-3">
+                  <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: c.color_hex }} />
+                  <span className="w-32 flex-shrink-0 truncate text-sm text-gray-700 dark:text-slate-300">{c.category_name}</span>
+                  <div className="flex flex-1 items-center gap-2 min-w-0">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-slate-800">
+                      <div
+                        className="h-1.5 rounded-full transition-all"
+                        style={{ width: `${c.barPct}%`, backgroundColor: c.color_hex }}
+                      />
+                    </div>
+                  </div>
+                  <span className="w-24 flex-shrink-0 text-right text-sm font-medium text-gray-900 dark:text-slate-100">
+                    {fmt(c.total_payables)}
+                  </span>
+                  <div className="w-20 flex-shrink-0 text-right">
+                    <DeltaBadge pct={c.deltaPct} invertColor />
+                  </div>
+                  <span className="hidden w-24 flex-shrink-0 text-right text-xs text-gray-400 dark:text-slate-500 sm:block">
+                    {c.prevAmount !== null ? fmt(c.prevAmount) : "—"}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
-          {categoryChartData.length === 0 ? (
-            <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-700 text-slate-400">
-              Nenhuma conta encontrada para este mês.
-            </div>
-          ) : (
-            <div style={{ height: Math.max(180, categoryChartData.length * 44) }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={categoryChartData} layout="vertical" margin={{ left: 8, right: 90, top: 0, bottom: 0 }}>
-                  <XAxis type="number" hide />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    tick={{ fill: "#cbd5e1", fontSize: 13 }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={110}
-                  />
-                  <Tooltip
-                    formatter={(v, _name, props) => [fmt(v), props.payload.fullName]}
-                    contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "12px" }}
-                    labelStyle={{ color: "#e2e8f0" }}
-                    itemStyle={{ color: "#e2e8f0" }}
-                    cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                  />
-                  <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={28} label={customBarLabel}>
-                    {categoryChartData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </section>
+        )}
 
-        {/* Orçamento por categoria */}
+        {/* Budget */}
         {summary?.by_category?.filter((c) => c.budget_limit != null).length > 0 && (
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
-            <h2 className="mb-4 text-lg font-semibold text-white">Orçamento por Categoria</h2>
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h2 className="mb-4 text-sm font-semibold text-gray-900 dark:text-slate-100">Orçamento por categoria</h2>
             <div className="flex flex-col gap-4">
               {summary.by_category
                 .filter((c) => c.budget_limit != null)
@@ -303,16 +415,16 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
                   const over = (c.budget_used_pct ?? 0) > 100;
                   return (
                     <div key={c.category_id ?? c.category_name}>
-                      <div className="mb-1 flex items-center justify-between text-sm">
-                        <span className="font-medium text-white">{c.category_name}</span>
-                        <span className={over ? "text-rose-400" : "text-slate-300"}>
+                      <div className="mb-1.5 flex items-center justify-between text-sm">
+                        <span className="font-medium text-gray-800 dark:text-slate-200">{c.category_name}</span>
+                        <span className={over ? "text-rose-600 dark:text-rose-400" : "text-gray-500 dark:text-slate-400"}>
                           {fmt(c.total_payables)} / {fmt(c.budget_limit)}
-                          {over && " ⚠ Estourado"}
+                          {over && " · Estourado"}
                         </span>
                       </div>
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-slate-800">
                         <div
-                          className={`h-2 rounded-full transition-all ${over ? "bg-rose-500" : "bg-emerald-500"}`}
+                          className={`h-1.5 rounded-full transition-all ${over ? "bg-rose-500" : "bg-emerald-500"}`}
                           style={{ width: `${pct}%` }}
                         />
                       </div>
@@ -320,7 +432,7 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
                   );
                 })}
             </div>
-          </section>
+          </div>
         )}
 
       </div>

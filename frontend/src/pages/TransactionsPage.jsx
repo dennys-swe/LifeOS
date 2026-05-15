@@ -61,45 +61,45 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-10">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-8">
 
-        <header className="flex flex-col gap-3">
-          <p className="text-xs uppercase tracking-[0.4em] text-slate-500">Extrato</p>
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <h1 className="text-3xl font-semibold text-white md:text-4xl">Transações</h1>
-            <MonthNavigator month={month} year={year} onChange={onMonthChange} />
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-widest text-gray-400 dark:text-slate-500">Extrato</p>
+            <h1 className="mt-1 text-2xl font-semibold text-gray-900 dark:text-slate-100">Transações</h1>
           </div>
+          <MonthNavigator month={month} year={year} onChange={onMonthChange} />
         </header>
 
-        {/* Mini cards de resumo */}
-        <section className="grid gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-5 py-4">
-            <p className="text-xs text-slate-400">Total de registros</p>
-            <p className="mt-1 text-xl font-semibold text-white">{filtered.length}</p>
+        {/* Summary cards */}
+        <section className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <p className="text-xs text-gray-500 dark:text-slate-400">Total de registros</p>
+            <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-slate-100">{filtered.length}</p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-5 py-4">
-            <p className="text-xs text-slate-400">Entradas</p>
-            <p className="mt-1 text-xl font-semibold text-emerald-400">{fmt(totalIncome)}</p>
+          <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <p className="text-xs text-gray-500 dark:text-slate-400">Entradas</p>
+            <p className="mt-1 text-xl font-semibold text-emerald-600 dark:text-emerald-400">{fmt(totalIncome)}</p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-5 py-4">
-            <p className="text-xs text-slate-400">Saídas</p>
-            <p className="mt-1 text-xl font-semibold text-rose-400">{fmt(totalExpense)}</p>
+          <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <p className="text-xs text-gray-500 dark:text-slate-400">Saídas</p>
+            <p className="mt-1 text-xl font-semibold text-rose-600 dark:text-rose-400">{fmt(totalExpense)}</p>
           </div>
         </section>
 
-        {/* Filtros */}
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        {/* Filters */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap gap-2">
             {TYPE_FILTERS.map((f) => (
               <button
                 key={f.key}
                 type="button"
                 onClick={() => setTypeFilter(f.key)}
-                className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
                   typeFilter === f.key
-                    ? "bg-emerald-500/20 text-emerald-300"
-                    : "border border-slate-700 text-slate-300 hover:bg-slate-900"
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                    : "border border-gray-200 text-gray-600 hover:bg-gray-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
                 }`}
               >
                 {f.label}
@@ -111,17 +111,17 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar por descrição..."
-            className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-emerald-500 md:w-72"
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 placeholder-gray-400 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder-slate-500 sm:w-72"
           />
         </div>
 
-        {/* Lista */}
-        {error && <p className="text-sm text-rose-400">{error}</p>}
+        {/* List */}
+        {error && <p className="text-sm text-rose-500 dark:text-rose-400">{error}</p>}
 
         {loading ? (
-          <div className="flex h-40 items-center justify-center text-slate-400">Carregando...</div>
+          <div className="flex h-40 items-center justify-center text-gray-400 dark:text-slate-400">Carregando...</div>
         ) : filtered.length === 0 ? (
-          <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-700 text-slate-400">
+          <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-gray-200 text-gray-400 dark:border-slate-700 dark:text-slate-500">
             Nenhuma transação encontrada.
           </div>
         ) : (
@@ -129,27 +129,27 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
             {filtered.map((t) => (
               <div
                 key={t.id}
-                className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3"
+                className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/60"
               >
                 <div className="flex min-w-0 flex-col gap-0.5">
-                  <p className="truncate text-sm font-medium text-white">{t.description}</p>
+                  <p className="truncate text-sm font-medium text-gray-900 dark:text-slate-100">{t.description}</p>
                   <div className="flex items-center gap-2">
-                    <p className="text-xs text-slate-400">{formatDate(t.date)}</p>
+                    <p className="text-xs text-gray-400 dark:text-slate-500">{formatDate(t.date)}</p>
                     {t.source && (
-                      <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500 dark:bg-slate-800 dark:text-slate-400">
                         {t.source}
                       </span>
                     )}
                   </div>
                 </div>
                 <div className="ml-4 flex flex-shrink-0 flex-col items-end gap-1">
-                  <p className={`text-sm font-semibold ${t.type === "INCOME" ? "text-emerald-400" : "text-rose-400"}`}>
-                    {t.type === "INCOME" ? "+" : "-"}{fmt(Number(t.amount))}
+                  <p className={`text-sm font-semibold ${t.type === "INCOME" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                    {t.type === "INCOME" ? "+" : "−"}{fmt(Number(t.amount))}
                   </p>
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
                     t.type === "INCOME"
-                      ? "bg-emerald-500/15 text-emerald-300"
-                      : "bg-rose-500/15 text-rose-300"
+                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                      : "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
                   }`}>
                     {t.type === "INCOME" ? "Entrada" : "Saída"}
                   </span>
