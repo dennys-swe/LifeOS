@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import api from "../services/api";
 import ConfirmModal from "../components/ConfirmModal";
+import EditPayableModal from "../components/EditPayableModal";
 import MonthNavigator from "../components/MonthNavigator";
 import StatusBadge from "../components/StatusBadge";
 import Toast from "../components/Toast";
@@ -23,6 +24,7 @@ export default function PayablesPage({
 }) {
   const [activeTab, setActiveTab] = useState("payables");
   const { payables: allPayables, categories, refresh } = useFinance();
+  const [editingPayable, setEditingPayable] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [confirmState, setConfirmState] = useState({
     open: false,
@@ -45,9 +47,16 @@ export default function PayablesPage({
     return () => {
       if (pendingDeleteRef.current) {
         clearTimeout(pendingDeleteRef.current.timer);
+        api.delete(`/payables/${pendingDeleteRef.current.id}`).catch(() => {});
       }
     };
   }, []);
+
+  useEffect(() => {
+    api.post(`/recurring-payables/generate?month=${month}&year=${year}`)
+      .then(() => refresh())
+      .catch(() => {});
+  }, [month, year]);
 
   // FILTRO DE MÊS: Usa split para evitar bug de fuso
   const payablesThisMonth = useMemo(() => {
@@ -91,6 +100,7 @@ export default function PayablesPage({
     pendingDeleteRef.current = null;
     try {
       await api.delete(`/payables/${id}`);
+      setOptimisticPayables(null);
       refresh();
     } catch {
       setErrorMessage("Falha ao excluir conta.");
@@ -211,6 +221,13 @@ export default function PayablesPage({
             )}
             <button
               type="button"
+              onClick={() => setEditingPayable(item)}
+              className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-500 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-slate-700 dark:text-slate-400 dark:hover:border-emerald-500/60 dark:hover:text-emerald-400"
+            >
+              Editar
+            </button>
+            <button
+              type="button"
               onClick={() => handleDelete(item.id)}
               className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-500 transition hover:border-rose-300 hover:text-rose-600 dark:border-slate-700 dark:text-slate-400 dark:hover:border-rose-500/60 dark:hover:text-rose-400"
             >
@@ -241,6 +258,14 @@ export default function PayablesPage({
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+      {editingPayable && (
+        <EditPayableModal
+          payable={editingPayable}
+          categories={categories}
+          onClose={() => setEditingPayable(null)}
+          onSaved={() => { refresh(); setEditingPayable(null); }}
+        />
+      )}
       <ConfirmModal
         open={confirmState.open}
         title={
