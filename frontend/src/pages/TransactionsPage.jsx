@@ -131,12 +131,12 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
                 key={t.id}
                 className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/60"
               >
-                <div className="flex min-w-0 flex-col gap-0.5">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <p className="truncate text-sm font-medium text-gray-900 dark:text-slate-100">{t.description}</p>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-gray-400 dark:text-slate-500">{formatDate(t.date)}</p>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="flex-shrink-0 text-xs text-gray-400 dark:text-slate-500">{formatDate(t.date)}</p>
                     {t.source && (
-                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500 dark:bg-slate-800 dark:text-slate-400">
+                      <span className="max-w-[7rem] truncate rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500 dark:bg-slate-800 dark:text-slate-400">
                         {t.source}
                       </span>
                     )}

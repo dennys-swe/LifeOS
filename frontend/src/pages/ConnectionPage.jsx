@@ -377,9 +377,9 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
             </div>
             <div className="divide-y divide-gray-50 dark:divide-slate-800/60">
               {categoryTableData.map((c) => (
-                <div key={c.category_name} className="flex items-center gap-4 px-6 py-3">
+                <div key={c.category_name} className="flex items-center gap-2 px-3 py-3 sm:gap-4 sm:px-6">
                   <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: c.color_hex }} />
-                  <span className="w-32 flex-shrink-0 truncate text-sm text-gray-700 dark:text-slate-300">{c.category_name}</span>
+                  <span className="w-24 flex-shrink-0 truncate text-sm text-gray-700 dark:text-slate-300 sm:w-32">{c.category_name}</span>
                   <div className="flex flex-1 items-center gap-2 min-w-0">
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-slate-800">
                       <div
@@ -388,10 +388,10 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
                       />
                     </div>
                   </div>
-                  <span className="w-24 flex-shrink-0 text-right text-sm font-medium text-gray-900 dark:text-slate-100">
+                  <span className="w-16 flex-shrink-0 text-right text-sm font-medium text-gray-900 dark:text-slate-100 sm:w-24">
                     {fmt(c.total_payables)}
                   </span>
-                  <div className="w-20 flex-shrink-0 text-right">
+                  <div className="hidden w-20 flex-shrink-0 text-right sm:block">
                     <DeltaBadge pct={c.deltaPct} invertColor />
                   </div>
                   <span className="hidden w-24 flex-shrink-0 text-right text-xs text-gray-400 dark:text-slate-500 sm:block">

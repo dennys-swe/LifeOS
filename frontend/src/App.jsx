@@ -29,7 +29,7 @@ export default function App() {
         <FinanceProvider month={selectedMonth} year={selectedYear}>
           <Sidebar activePage={activePage} onNavigate={setActivePage} />
 
-          <main className="flex-1 md:ml-60">
+          <main className="flex-1 overflow-x-hidden md:ml-60">
             {activePage === PAGES.dashboard && (
               <ConnectionPage
                 month={selectedMonth}
