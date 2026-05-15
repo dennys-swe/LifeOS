@@ -24,3 +24,17 @@ class SummaryResponse(BaseModel):
     total_paid: Decimal
     balance: Decimal
     by_category: List[CategorySummary]
+
+
+class MonthSummary(BaseModel):
+    month: int
+    year: int
+    total_income: Decimal
+    total_expenses: Decimal
+    total_pending: Decimal
+    total_paid: Decimal
+    balance: Decimal
+
+
+class HistoryResponse(BaseModel):
+    months: List[MonthSummary]

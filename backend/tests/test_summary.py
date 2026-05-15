@@ -123,3 +123,46 @@ def test_upcoming_excludes_beyond_range(client, db_session):
     resp = client.get("/payables/upcoming?days=7")
     ids = [item["id"] for item in resp.json()]
     assert str(p.id) not in ids
+
+
+def test_history_returns_n_months(client):
+    resp = client.get("/summary/history?months=3")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["months"]) == 3
+
+
+def test_history_months_in_order(client, db_session):
+    resp = client.get("/summary/history?months=6")
+    months = resp.json()["months"]
+    assert len(months) == 6
+    labels = [(m["year"], m["month"]) for m in months]
+    assert labels == sorted(labels)
+
+
+def test_history_default_months(client):
+    resp = client.get("/summary/history")
+    assert resp.status_code == 200
+    assert len(resp.json()["months"]) == 6
+
+
+def test_history_totals_match_summary(client, db_session):
+    from datetime import date
+    from app.models.transaction import Transaction, TransactionType
+    t = Transaction(
+        id=__import__("uuid").uuid4(),
+        date=date(2026, 5, 10),
+        description="Salário",
+        amount=1000,
+        type=TransactionType.INCOME,
+    )
+    db_session.add(t)
+    db_session.commit()
+
+    hist = client.get("/summary/history?months=6").json()
+    may = next((m for m in hist["months"] if m["month"] == 5 and m["year"] == 2026), None)
+    assert may is not None
+    assert float(may["total_income"]) == 1000
+
+    summary = client.get("/summary?month=5&year=2026").json()
+    assert float(summary["total_income"]) == float(may["total_income"])

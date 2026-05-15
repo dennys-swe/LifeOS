@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.category import Category
 from app.models.payable import Payable, PayableStatus
 from app.models.transaction import Transaction, TransactionType
-from app.schemas.summary import CategorySummary, SummaryResponse
+from app.schemas.summary import CategorySummary, HistoryResponse, MonthSummary, SummaryResponse
 from app.services.budget_service import build_budget_map
 
 
@@ -101,3 +101,25 @@ def get_summary(db: Session, month: int, year: int) -> SummaryResponse:
         balance=total_income - total_expenses,
         by_category=by_category,
     )
+
+
+def get_history(db: Session, months: int = 6) -> HistoryResponse:
+    today = date.today()
+    result = []
+    for i in range(months - 1, -1, -1):
+        m = today.month - i
+        y = today.year
+        while m <= 0:
+            m += 12
+            y -= 1
+        s = get_summary(db, month=m, year=y)
+        result.append(MonthSummary(
+            month=m,
+            year=y,
+            total_income=s.total_income,
+            total_expenses=s.total_expenses,
+            total_pending=s.total_pending,
+            total_paid=s.total_paid,
+            balance=s.balance,
+        ))
+    return HistoryResponse(months=result)
