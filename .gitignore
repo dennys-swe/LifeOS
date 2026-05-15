@@ -3,6 +3,7 @@ backend/venv/
 **/__pycache__/
 **/*.pyc
 backend/.env
+backend/.pytest_cache/
 
 # Node.js
 frontend/node_modules/
@@ -12,3 +13,6 @@ frontend/.env.local
 # Database / OS
 *.sqlite3
 .DS_Store
+
+# Claude Code
+.claude/

@@ -1,68 +1,101 @@
-# 💰 LifeOS - Gestão Financeira Inteligente (MVP)
+# LifeOS - Gestão Financeira Pessoal
 
-Sistema Fullstack responsivo focado em **integridade de dados** e **alta disponibilidade**. Desenvolvido para centralizar o controle de gastos e contas a pagar com uma experiência *mobile-first*.
-
----
-
-## 🏗️ 1. Arquitetura do Ecossistema (Cloud Native)
-
-O projeto evoluiu de um ambiente local para uma infraestrutura distribuída em nuvem, garantindo escalabilidade e acesso global:
-
-* **Database:** PostgreSQL Serverless hospedado na **Neon.tech**.
-* **Backend:** API FastAPI (Python) hospedada no **Render**.
-* **Frontend:** SPA React + Vite + Tailwind CSS (v4) hospedada na **Vercel**.
-* **Monitoring:** Health checks automatizados via **UptimeRobot** para mitigação de *Cold Start* no Render.
+SPA fullstack responsivo para controle de contas a pagar, transações, orçamento por categoria e conciliação bancária. Foco em integridade de dados e experiência mobile-first.
 
 ---
 
-## 🛠️ 2. Destaques de Engenharia (The Jala Way)
+## Arquitetura (Cloud Native)
 
-Durante o desenvolvimento, foram resolvidos desafios críticos de software para garantir a robustez do sistema:
-
-* **Data Integrity (Timezone Fix):** Implementação de lógica de manipulação de datas baseada em strings ISO e processamento via `.split('-')`. Esta abordagem eliminou bugs de fuso horário (GMT) que causavam o deslocamento de datas de vencimento no frontend, garantindo que o dado persistido seja exatamente o exibido.
-* **High Availability (Uptime):** Configuração de rotas de monitoramento compatíveis com o método `HEAD` através de `@app.api_route`. Isso permite que serviços externos de monitoramento mantenham a instância do Render ativa 24/7, reduzindo o tempo de resposta inicial de 20s para < 2s.
-* **CI/CD Pipeline:** Fluxo automatizado de deploy via GitHub. Gestão de múltiplas identidades de commit e resolução de conflitos de histórico para manter o ambiente de produção sempre sincronizado com o repositório principal.
-
----
-
-## 📖 3. Status das Funcionalidades
-
-### **Dashboard & Navegação** [✅ CONCLUÍDO]
-* Navegação mensal dinâmica com o componente `MonthNavigator`.
-* Filtros inteligentes por estado: **Pendentes**, **Pagas** e **Atrasadas**.
-* Indicador de contas vencendo no dia atual.
-
-### **Controle de Payables (Contas a Pagar)** [✅ CONCLUÍDO]
-* CRUD completo com persistência no Neon PostgreSQL.
-* Lógica de "Baixa" (Marcar como Pago) com atualização de status em tempo real.
-* Sistema de **Undo** (Desfazer) para exclusões acidentais integrado a notificações *Toast*.
-
-### **Importação de Extratos** [✅ CONCLUÍDO]
-* Parser de CSV com mapeamento dinâmico de colunas (Data, Descrição, Valor).
-* Feedback visual de progresso e redirecionamento automático.
-
----
-
-## 📊 4. Modelagem de Dados (Entidade Principal)
-
-### **Payable (Contas a Pagar)**
-| Campo | Tipo | Descrição |
+| Camada | Tecnologia | Hospedagem |
 | :--- | :--- | :--- |
-| `title` | String | Descrição amigável da despesa |
-| `due_date` | String (ISO) | Vencimento (YYYY-MM-DD) - **Imune a Timezone** |
-| `amount` | Decimal | Valor monetário da conta |
-| `status` | Enum | `PENDING`, `PAID` |
-| `category_id` | UUID | Relacionamento com a categoria da despesa |
+| Database | PostgreSQL Serverless | Neon.tech |
+| Backend | FastAPI (Python) | Render |
+| Frontend | React + Vite + Tailwind CSS v4 | Vercel |
+| Monitoring | Health check HEAD/GET `/` | UptimeRobot |
 
 ---
 
-## 📅 5. Road Map (Próximos Passos)
+## Funcionalidades
 
-1.  **Categorização Inteligente:** Lógica para agrupar gastos automaticamente (ex: "Mercado", "Assinaturas").
-2.  **Gráficos de Consumo:** Visualização de gastos por categoria utilizando a biblioteca Recharts.
-3.  **PWA Setup:** Configuração de manifest e service workers para instalação como App nativo no iOS/Android.
-4.  **Módulo de Milhas:** Registro de retorno financeiro (cashback/milhas) por transação paga.
+### Contas a Pagar (Payables)
+- CRUD completo com persistência no PostgreSQL
+- Filtros por status: Pendentes, Pagas, Atrasadas
+- Exclusão com **Undo** via toast (remoção otimista + `setTimeout` de 5s)
+- Badge na navbar com contagem de contas vencendo em ≤7 dias
+
+### Recorrentes
+- Templates de recorrência (título, valor, dia do mês)
+- Geração automática para o mês sem duplicatas
+
+### Categorias e Orçamento
+- CRUD de categorias com cor personalizada
+- Regras de categorização por keyword (prioridade configurável)
+- Orçamento mensal por categoria com `% utilizado`
+
+### Importação e Conciliação
+- Upload de extrato CSV com mapeamento dinâmico de colunas
+- Sugestões automáticas de conciliação com scoring de confiança (valor ±5%, data ±7 dias)
+
+### Dashboard
+- Cards de saldo (receita, despesa, saldo líquido)
+- Barras de progresso de orçamento por categoria
+- Gráfico de histórico dos últimos 6 meses
+
+### PWA e Push Notifications
+- Manifest e service worker configurados (instalável no iOS/Android)
+- Push notifications VAPID para contas vencendo em breve
 
 ---
-**Última atualização:** 31 de Março de 2026
-*Desenvolvido por Dennys Alves como projeto prático de Software Engineering.*
+
+## Destaques de Engenharia
+
+- **Timezone Fix:** datas trafegam e são comparadas como strings `YYYY-MM-DD` (nunca `new Date(due_date)`), eliminando o deslocamento de dia por offset GMT.
+- **High Availability:** rota raiz usa `@app.api_route` para suportar método `HEAD`, mantendo a instância do Render ativa via UptimeRobot e reduzindo cold start de ~20s para <2s.
+- **Compatibilidade SQLite/PostgreSQL:** agregações do `summary_service` feitas em Python (não `GROUP BY` SQL) para que os testes rodem em SQLite em memória sem mock de banco.
+
+---
+
+## Modelagem de Dados
+
+| Modelo | Descrição |
+| :--- | :--- |
+| `Payable` | Conta a pagar. FKs nullable: `recurring_payable_id`, `transaction_id` |
+| `RecurringPayable` | Template de recorrência (title, amount, day_of_month, active) |
+| `Transaction` | Transação de extrato bancário |
+| `Category` | Categoria com cor (`color_hex`) |
+| `CategoryRule` | Regra de categorização por keyword (UPPERCASE, priority DESC) |
+| `Budget` | Orçamento mensal por categoria — unique(category_id, month, year) |
+| `BankAccount` | Conta bancária (sync retorna 501) |
+| `PushSubscription` | Subscription VAPID para push notifications |
+
+---
+
+## Como rodar localmente
+
+### Backend
+
+```bash
+cd backend
+cp .env.example .env   # preencher DATABASE_URL
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev            # VITE_API_URL padrão: http://localhost:8000
+```
+
+### Testes
+
+```bash
+cd backend && pytest   # SQLite em memória, sem banco externo
+```
+
+---
+
+*Desenvolvido por Dennys Alves — Última atualização: maio de 2026*
