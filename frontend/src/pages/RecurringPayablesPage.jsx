@@ -10,7 +10,7 @@ const INITIAL_FORM = {
   active: true,
 };
 
-export default function RecurringPayablesPage({ month, year }) {
+export default function RecurringPayablesPage({ month, year, embedded = false }) {
   const { categories, refresh } = useFinance();
   const [recurrings, setRecurrings] = useState([]);
   const [form, setForm] = useState(INITIAL_FORM);
@@ -86,106 +86,134 @@ export default function RecurringPayablesPage({ month, year }) {
     }
   };
 
-  return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-10">
-      <header className="flex flex-col gap-3">
-        <p className="text-xs uppercase tracking-[0.4em] text-slate-500">Automação</p>
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <h1 className="text-3xl font-semibold text-white">Contas Recorrentes</h1>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleGenerate}
-              disabled={generating}
-              className="rounded-full border border-emerald-500/60 px-4 py-2 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/10 disabled:opacity-50"
-            >
-              {generating ? "Gerando..." : `Gerar ${month}/${year}`}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowForm((v) => !v)}
-              className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
-            >
-              + Nova Recorrente
-            </button>
+  const inputCls = "mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
+  const labelCls = "flex flex-col text-sm font-medium text-gray-700 dark:text-slate-300";
+
+  const content = (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {!embedded && (
+          <div>
+            <p className="text-xs font-medium uppercase tracking-widest text-gray-400 dark:text-slate-500">Automação</p>
+            <h1 className="mt-1 text-2xl font-semibold text-gray-900 dark:text-slate-100">Contas Recorrentes</h1>
           </div>
+        )}
+        <div className={`flex gap-2 ${embedded ? "ml-auto" : ""}`}>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={generating}
+            className="rounded-xl border border-emerald-300 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-500/60 dark:text-emerald-400 dark:hover:bg-emerald-500/10"
+          >
+            {generating ? "Gerando..." : `Gerar ${month}/${year}`}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500"
+          >
+            + Nova
+          </button>
         </div>
-        {message && <p className="text-sm text-emerald-400">{message}</p>}
-      </header>
+      </div>
+
+      {message && <p className="text-sm text-emerald-600 dark:text-emerald-400">{message}</p>}
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-          <h2 className="text-base font-semibold text-white">Nova Recorrente</h2>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-gray-50 p-5 dark:border-slate-700 dark:bg-slate-800/50">
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-200">Nova Recorrente</h2>
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="text-sm text-slate-300">
+            <label className={labelCls}>
               Título
-              <input type="text" required value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-                className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
+              <input type="text" required value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} className={inputCls} />
             </label>
-            <label className="text-sm text-slate-300">
+            <label className={labelCls}>
               Valor (R$)
-              <input type="number" step="0.01" required value={form.amount} onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
-                className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
+              <input type="number" step="0.01" required value={form.amount} onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))} className={inputCls} />
             </label>
-            <label className="text-sm text-slate-300">
-              Dia do mês (1-31)
-              <input type="number" min="1" max="31" required value={form.day_of_month} onChange={(e) => setForm((p) => ({ ...p, day_of_month: e.target.value }))}
-                className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
+            <label className={labelCls}>
+              Dia do mês (1–31)
+              <input type="number" min="1" max="31" required value={form.day_of_month} onChange={(e) => setForm((p) => ({ ...p, day_of_month: e.target.value }))} className={inputCls} />
             </label>
-            <label className="text-sm text-slate-300">
+            <label className={labelCls}>
               Categoria
-              <select value={form.category_id} onChange={(e) => setForm((p) => ({ ...p, category_id: e.target.value }))}
-                className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+              <select value={form.category_id} onChange={(e) => setForm((p) => ({ ...p, category_id: e.target.value }))} className={inputCls}>
                 <option value="">Sem categoria</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
           </div>
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" checked={form.active} onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))} />
-              Ativa
-            </label>
-          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-slate-300">
+            <input type="checkbox" checked={form.active} onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))} />
+            Ativa
+          </label>
           <div className="flex gap-3">
-            <button type="submit" disabled={loading}
-              className="rounded-full bg-emerald-500 px-6 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50">
+            <button type="submit" disabled={loading} className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
               {loading ? "Salvando..." : "Salvar"}
             </button>
-            <button type="button" onClick={() => setShowForm(false)}
-              className="rounded-full border border-slate-700 px-6 py-2 text-sm text-slate-300 hover:bg-slate-900">
+            <button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-gray-200 px-5 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
               Cancelar
             </button>
           </div>
         </form>
       )}
 
-      <section className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3">
         {recurrings.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-slate-400">
-            Nenhuma recorrente cadastrada. Crie uma acima.
+          <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-gray-400 dark:border-slate-700 dark:text-slate-500">
+            Nenhuma recorrente cadastrada.
           </div>
         ) : (
           recurrings.map((rec) => (
-            <div key={rec.id} className={`flex flex-col gap-3 rounded-xl border p-4 md:flex-row md:items-center md:justify-between ${rec.active ? "border-slate-800 bg-slate-950/40" : "border-slate-800/40 bg-slate-950/20 opacity-60"}`}>
+            <div
+              key={rec.id}
+              className={`flex flex-col gap-3 rounded-xl border p-4 md:flex-row md:items-center md:justify-between ${
+                rec.active
+                  ? "border-gray-100 bg-gray-50 dark:border-slate-800 dark:bg-slate-950/40"
+                  : "border-gray-100 bg-gray-50 opacity-50 dark:border-slate-800 dark:bg-slate-950/40"
+              }`}
+            >
               <div>
-                <p className="text-sm font-medium text-white">{rec.title}</p>
-                <p className="text-xs text-slate-400">Todo dia {rec.day_of_month} · R$ {Number(rec.amount).toFixed(2)}</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-slate-100">{rec.title}</p>
+                <p className="text-xs text-gray-500 dark:text-slate-400">
+                  Todo dia {rec.day_of_month} · R$ {Number(rec.amount).toFixed(2)}
+                  {!rec.active && <span className="ml-2 text-gray-400 dark:text-slate-600">(inativa)</span>}
+                </p>
               </div>
-              <div className="flex items-center gap-3">
-                <button type="button" onClick={() => handleToggleActive(rec)}
-                  className={`rounded-full border px-3 py-1 text-xs transition ${rec.active ? "border-amber-500/40 text-amber-300 hover:bg-amber-500/10" : "border-slate-700 text-slate-400 hover:bg-slate-900"}`}>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleToggleActive(rec)}
+                  className={`rounded-lg border px-3 py-1 text-xs font-medium transition ${
+                    rec.active
+                      ? "border-amber-200 text-amber-700 hover:bg-amber-50 dark:border-amber-500/40 dark:text-amber-400 dark:hover:bg-amber-500/10"
+                      : "border-gray-200 text-gray-500 hover:bg-gray-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-900"
+                  }`}
+                >
                   {rec.active ? "Desativar" : "Ativar"}
                 </button>
-                <button type="button" onClick={() => handleDelete(rec.id)}
-                  className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 transition hover:border-rose-500/60 hover:text-rose-300">
+                <button
+                  type="button"
+                  onClick={() => handleDelete(rec.id)}
+                  className="rounded-lg px-3 py-1 text-xs text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                >
                   Excluir
                 </button>
               </div>
             </div>
           ))
         )}
-      </section>
+      </div>
+    </div>
+  );
+
+  if (embedded) return content;
+
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-8">
+        {content}
+      </div>
     </div>
   );
 }

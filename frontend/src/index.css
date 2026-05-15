@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   font-family: "Space Grotesk", system-ui, sans-serif;
   color: #0f172a;

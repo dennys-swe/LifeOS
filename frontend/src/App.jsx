@@ -1,25 +1,16 @@
 import { useState } from "react";
 
+import { ThemeProvider } from "./context/ThemeContext";
 import { FinanceProvider } from "./context/FinanceContext";
+import Sidebar from "./components/Sidebar";
+import { PAGES } from "./pages";
 import ConnectionPage from "./pages/ConnectionPage";
 import PayablesPage from "./pages/PayablesPage";
-import RecurringPayablesPage from "./pages/RecurringPayablesPage";
-import CategoryRulesPage from "./pages/CategoryRulesPage";
 import TransactionsPage from "./pages/TransactionsPage";
-import UploadPage from "./pages/UploadPage";
 import BankAccountsPage from "./pages/BankAccountsPage";
+import SettingsPage from "./pages/SettingsPage";
+import UploadPage from "./pages/UploadPage";
 import FabModal from "./components/FabModal";
-import Navbar from "./components/Navbar";
-
-const PAGES = {
-  dashboard: "dashboard",
-  payables: "payables",
-  transactions: "transactions",
-  recurring: "recurring",
-  rules: "rules",
-  upload: "upload",
-  banks: "banks",
-};
 
 export default function App() {
   const [activePage, setActivePage] = useState(PAGES.dashboard);
@@ -33,44 +24,47 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <FinanceProvider month={selectedMonth} year={selectedYear}>
-        <Navbar activePage={activePage} onNavigate={setActivePage} />
+    <ThemeProvider>
+      <div className="flex min-h-screen bg-gray-50 dark:bg-slate-950">
+        <FinanceProvider month={selectedMonth} year={selectedYear}>
+          <Sidebar activePage={activePage} onNavigate={setActivePage} />
 
-        {activePage === PAGES.dashboard && (
-          <ConnectionPage
-            month={selectedMonth}
-            year={selectedYear}
-            onMonthChange={handleMonthChange}
-          />
-        )}
-        {activePage === PAGES.payables && (
-          <PayablesPage
-            filter={payablesFilter}
-            onFilterChange={setPayablesFilter}
-            month={selectedMonth}
-            year={selectedYear}
-            onMonthChange={handleMonthChange}
-          />
-        )}
-        {activePage === PAGES.transactions && (
-          <TransactionsPage
-            month={selectedMonth}
-            year={selectedYear}
-            onMonthChange={handleMonthChange}
-          />
-        )}
-        {activePage === PAGES.recurring && (
-          <RecurringPayablesPage month={selectedMonth} year={selectedYear} />
-        )}
-        {activePage === PAGES.rules && <CategoryRulesPage />}
-        {activePage === PAGES.upload && (
-          <UploadPage onNavigate={setActivePage} />
-        )}
-        {activePage === PAGES.banks && <BankAccountsPage />}
+          <main className="flex-1 md:ml-60">
+            {activePage === PAGES.dashboard && (
+              <ConnectionPage
+                month={selectedMonth}
+                year={selectedYear}
+                onMonthChange={handleMonthChange}
+              />
+            )}
+            {activePage === PAGES.payables && (
+              <PayablesPage
+                filter={payablesFilter}
+                onFilterChange={setPayablesFilter}
+                month={selectedMonth}
+                year={selectedYear}
+                onMonthChange={handleMonthChange}
+              />
+            )}
+            {activePage === PAGES.transactions && (
+              <TransactionsPage
+                month={selectedMonth}
+                year={selectedYear}
+                onMonthChange={handleMonthChange}
+              />
+            )}
+            {activePage === PAGES.banks && (
+              <BankAccountsPage onNavigateUpload={() => setActivePage("upload")} />
+            )}
+            {activePage === PAGES.settings && <SettingsPage />}
+            {activePage === "upload" && (
+              <UploadPage onNavigate={setActivePage} />
+            )}
+          </main>
 
-        <FabModal />
-      </FinanceProvider>
-    </div>
+          <FabModal />
+        </FinanceProvider>
+      </div>
+    </ThemeProvider>
   );
 }
