@@ -5,6 +5,7 @@ import ConnectionPage from "./pages/ConnectionPage";
 import PayablesPage from "./pages/PayablesPage";
 import RecurringPayablesPage from "./pages/RecurringPayablesPage";
 import CategoryRulesPage from "./pages/CategoryRulesPage";
+import TransactionsPage from "./pages/TransactionsPage";
 import UploadPage from "./pages/UploadPage";
 import BankAccountsPage from "./pages/BankAccountsPage";
 import FabModal from "./components/FabModal";
@@ -13,6 +14,7 @@ import Navbar from "./components/Navbar";
 const PAGES = {
   dashboard: "dashboard",
   payables: "payables",
+  transactions: "transactions",
   recurring: "recurring",
   rules: "rules",
   upload: "upload",
@@ -46,6 +48,13 @@ export default function App() {
           <PayablesPage
             filter={payablesFilter}
             onFilterChange={setPayablesFilter}
+            month={selectedMonth}
+            year={selectedYear}
+            onMonthChange={handleMonthChange}
+          />
+        )}
+        {activePage === PAGES.transactions && (
+          <TransactionsPage
             month={selectedMonth}
             year={selectedYear}
             onMonthChange={handleMonthChange}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import date as date_type
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
@@ -44,6 +46,10 @@ def get_connect_token(item_id: Optional[UUID] = None) -> str:
     return resp.access_token
 
 
+def _parse_pluggy_date(date_str: str) -> date_type:
+    return datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+
+
 def sync_account(db: Session, account: BankAccount) -> dict:
     if not account.external_id:
         raise ValueError("Conta sem item_id da Pluggy. Conecte o banco primeiro.")
@@ -61,17 +67,23 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         for pluggy_acct in pluggy_accounts:
             page = 1
             while True:
-                page_resp = tx_api.transactions_list(
+                # Use without_preload_content + raw JSON to bypass Pluggy SDK Pydantic
+                # validation errors caused by type mismatches in nested models
+                # (e.g. CreditCardMetadata.payeeMCC returned as int, declared as StrictStr).
+                raw_resp = tx_api.transactions_list_without_preload_content(
                     account_id=pluggy_acct.id,
                     page=page,
                     page_size=500,
                 )
-                transactions = page_resp.results or []
+                page_data = json.loads(raw_resp.data)
+                transactions = page_data.get("results") or []
+                total_pages = page_data.get("totalPages") or 1
+
                 if not transactions:
                     break
 
                 for tx in transactions:
-                    source_key = f"pluggy:{tx.id}"
+                    source_key = f"pluggy:{tx['id']}"
                     exists = db.execute(
                         select(Transaction).where(Transaction.source == source_key)
                     ).scalar_one_or_none()
@@ -80,22 +92,24 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         skipped += 1
                         continue
 
+                    amount_raw = tx.get("amount", 0) or 0
                     tx_type = (
                         TransactionType.INCOME
-                        if tx.amount > 0
+                        if amount_raw > 0
                         else TransactionType.EXPENSE
                     )
+                    tx_date = _parse_pluggy_date(tx["date"]) if tx.get("date") else date_type.today()
                     new_tx = Transaction(
-                        date=tx.date.date() if isinstance(tx.date, datetime) else tx.date,
-                        description=tx.description[:255],
-                        amount=Decimal(str(abs(tx.amount))),
+                        date=tx_date,
+                        description=(tx.get("description") or "")[:255],
+                        amount=Decimal(str(abs(amount_raw))),
                         type=tx_type,
                         source=source_key,
                     )
                     db.add(new_tx)
                     imported += 1
 
-                if page >= (page_resp.total_pages or 1):
+                if page >= total_pages:
                     break
                 page += 1
 
