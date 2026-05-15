@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -13,6 +14,8 @@ class RecurringPayableCreate(BaseModel):
     day_of_month: int = Field(ge=1, le=31)
     category_id: Optional[UUID] = None
     active: bool = True
+    start_date: date = Field(default_factory=date.today)
+    end_date: Optional[date] = None
 
 
 class RecurringPayableUpdate(BaseModel):
@@ -21,6 +24,8 @@ class RecurringPayableUpdate(BaseModel):
     day_of_month: Optional[int] = Field(default=None, ge=1, le=31)
     category_id: Optional[UUID] = None
     active: Optional[bool] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
 
 
 class RecurringPayableResponse(RecurringPayableCreate):

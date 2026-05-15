@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
 from uuid import uuid4
 
-from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Uuid
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -19,6 +20,8 @@ class RecurringPayable(Base):
         Uuid, ForeignKey("categories.id"), nullable=True
     )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False, default=date.today)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     category = relationship("Category")
     payables = relationship("Payable", back_populates="recurring_payable")

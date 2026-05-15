@@ -5,7 +5,7 @@ from datetime import date
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.payable import Payable, PayableStatus
@@ -59,6 +59,12 @@ def generate_for_month(db: Session, month: int, year: int) -> List[Payable]:
     created: List[Payable] = []
 
     for rec in actives:
+        gen_month = date(year, month, 1)
+        if gen_month < date(rec.start_date.year, rec.start_date.month, 1):
+            continue
+        if rec.end_date and gen_month > date(rec.end_date.year, rec.end_date.month, 1):
+            continue
+
         day = min(rec.day_of_month, end_day)
         due_date = date(year, month, day)
 
@@ -71,6 +77,19 @@ def generate_for_month(db: Session, month: int, year: int) -> List[Payable]:
         ).scalar_one_or_none()
 
         if already_exists:
+            continue
+
+        same_title = db.execute(
+            select(Payable).where(
+                func.lower(Payable.title) == rec.title.lower(),
+                Payable.due_date >= start_date,
+                Payable.due_date <= end_date,
+            )
+        ).scalar_one_or_none()
+
+        if same_title:
+            same_title.recurring_payable_id = rec.id
+            db.add(same_title)
             continue
 
         payable = Payable(
