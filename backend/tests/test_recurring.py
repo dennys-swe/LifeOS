@@ -14,9 +14,9 @@ from app.services.recurring_service import (
 )
 
 
-def _make_recurring(db_session, title="Internet", amount=99.90, day_of_month=10, active=True):
+def _make_recurring(db_session, title="Internet", amount=99.90, day_of_month=10, active=True, start_date=date(2025, 1, 1)):
     payload = RecurringPayableCreate(
-        title=title, amount=amount, day_of_month=day_of_month, active=active
+        title=title, amount=amount, day_of_month=day_of_month, active=active, start_date=start_date
     )
     return create_recurring(db_session, payload)
 
