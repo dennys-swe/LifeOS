@@ -29,6 +29,9 @@ export default function RecurringPayablesPage({ month, year, embedded = false })
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [suggestions, setSuggestions] = useState([]);
+  const [dismissed, setDismissed] = useState(new Set());
+  const [acceptingTitle, setAcceptingTitle] = useState(null);
 
   const setMsg = (text, type = "success") => { setMessage(text); setMessageType(type); };
 
@@ -41,9 +44,45 @@ export default function RecurringPayablesPage({ month, year, embedded = false })
     }
   };
 
+  const loadSuggestions = async () => {
+    try {
+      const res = await api.get("/recurring-payables/suggestions");
+      setSuggestions(res.data ?? []);
+    } catch {
+      setSuggestions([]);
+    }
+  };
+
   useEffect(() => {
     loadRecurrings();
+    loadSuggestions();
   }, []);
+
+  const handleAcceptSuggestion = async (suggestion) => {
+    setAcceptingTitle(suggestion.title);
+    try {
+      await api.post("/recurring-payables", {
+        title: suggestion.title,
+        amount: Number(suggestion.amount),
+        day_of_month: suggestion.day_of_month,
+        active: true,
+        start_date: firstOfCurrentMonth(),
+      });
+      setMsg(`"${suggestion.title}" adicionada às recorrentes.`);
+      await loadRecurrings();
+      await loadSuggestions();
+    } catch {
+      setMsg("Erro ao aceitar sugestão.", "error");
+    } finally {
+      setAcceptingTitle(null);
+    }
+  };
+
+  const handleDismissSuggestion = (title) => {
+    setDismissed((prev) => new Set(prev).add(title));
+  };
+
+  const visibleSuggestions = suggestions.filter((s) => !dismissed.has(s.title));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -234,6 +273,44 @@ export default function RecurringPayablesPage({ month, year, embedded = false })
             </button>
           </div>
         </form>
+      )}
+
+      {visibleSuggestions.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-200">
+            Sugestões de recorrentes detectadas no extrato
+          </h2>
+          {visibleSuggestions.map((s) => (
+            <div
+              key={s.title}
+              className="flex flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/5 md:flex-row md:items-center md:justify-between"
+            >
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-slate-100">{s.title}</p>
+                <p className="text-xs text-gray-500 dark:text-slate-400">
+                  Todo dia {s.day_of_month} · R$ {Number(s.amount).toFixed(2)} · visto em {s.distinct_months} meses
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleAcceptSuggestion(s)}
+                  disabled={acceptingTitle === s.title}
+                  className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+                >
+                  {acceptingTitle === s.title ? "Adicionando..." : "Aceitar"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDismissSuggestion(s.title)}
+                  className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                >
+                  Descartar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
       <div className="flex flex-col gap-3">

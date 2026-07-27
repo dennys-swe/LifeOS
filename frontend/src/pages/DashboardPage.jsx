@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Bar, BarChart, Cell, Legend, Pie, PieChart,
-  ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from "recharts";
+import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 
 import MonthNavigator from "../components/MonthNavigator";
 import { useFinance } from "../context/FinanceContext";
-import { useTheme } from "../context/ThemeContext";
 import api from "../services/api";
 
 const fmt = (v) =>
@@ -17,8 +13,6 @@ const fmtShort = (v) => {
   if (Math.abs(n) >= 1000) return `R$${(n / 1000).toFixed(1)}k`;
   return `R$${n.toFixed(0)}`;
 };
-
-const MONTH_LABELS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
 function delta(curr, prev) {
   if (!prev || Number(prev) === 0) return null;
@@ -39,18 +33,14 @@ function DeltaBadge({ pct, invertColor = false }) {
   );
 }
 
-function StatCard({ label, value, prevValue, subtitle, valueColor, invertDelta }) {
-  const pct = delta(value, prevValue);
+function StatCard({ label, value, subtitle, valueColor }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <p className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-slate-500">{label}</p>
       <p className={`mt-3 text-2xl font-semibold ${valueColor ?? "text-gray-900 dark:text-slate-100"}`}>
         {fmt(value ?? 0)}
       </p>
-      <div className="mt-2 flex items-center gap-2">
-        {pct !== null && <DeltaBadge pct={pct} invertColor={invertDelta} />}
-        <p className="text-xs text-gray-400 dark:text-slate-500">{subtitle}</p>
-      </div>
+      <p className="mt-2 text-xs text-gray-400 dark:text-slate-500">{subtitle}</p>
     </div>
   );
 }
@@ -66,12 +56,11 @@ function DonutCenter({ cx, cy, total }) {
   );
 }
 
-export default function ConnectionPage({ month, year, onMonthChange }) {
+export default function DashboardPage({ month, year, onMonthChange }) {
   const { summary, payables, loading } = useFinance();
-  const { dark } = useTheme();
   const [prevSummary, setPrevSummary] = useState(null);
   const [upcoming, setUpcoming] = useState([]);
-  const [history, setHistory] = useState([]);
+  const [bills, setBills] = useState([]);
 
   const prevMonth = month === 1 ? 12 : month - 1;
   const prevYear = month === 1 ? year - 1 : year;
@@ -80,11 +69,13 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
     api.get("/payables/upcoming?days=7")
       .then((r) => setUpcoming(r.data ?? []))
       .catch(() => setUpcoming([]));
-
-    api.get("/summary/history?months=6")
-      .then((r) => setHistory(r.data?.months ?? []))
-      .catch(() => setHistory([]));
   }, []);
+
+  useEffect(() => {
+    api.get("/credit-card-bills", { params: { month, year } })
+      .then((r) => setBills(r.data ?? []))
+      .catch(() => setBills([]));
+  }, [month, year]);
 
   useEffect(() => {
     api.get("/summary", { params: { month: prevMonth, year: prevYear } })
@@ -109,6 +100,25 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
   );
   const totalCount = payablesThisMonth.length;
   const progressPct = totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0;
+
+  const overduePayables = useMemo(
+    () => payablesThisMonth.filter((p) => p.status === "PENDING" && p.due_date < todayStr),
+    [payablesThisMonth, todayStr]
+  );
+  const overdueSum = useMemo(
+    () => overduePayables.reduce((s, p) => s + Number(p.amount), 0),
+    [overduePayables]
+  );
+
+  const upcomingSum = useMemo(
+    () => upcoming.reduce((s, p) => s + Number(p.amount), 0),
+    [upcoming]
+  );
+
+  const billsSum = useMemo(
+    () => bills.reduce((s, b) => s + Number(b.total_amount), 0),
+    [bills]
+  );
 
   const donutData = useMemo(() => {
     if (!summary) return [];
@@ -143,30 +153,6 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
       .sort((a, b) => Number(b.total_payables) - Number(a.total_payables));
   }, [summary, prevSummary, totalExpenses]);
 
-  const historyChartData = useMemo(() =>
-    history.map((m) => ({
-      label: `${MONTH_LABELS[m.month - 1]}/${String(m.year).slice(2)}`,
-      Entradas: Number(m.total_income),
-      Despesas: Number(m.total_expenses),
-    })),
-    [history]
-  );
-
-  const overdueCount = useMemo(
-    () => upcoming.filter((p) => p.due_date < todayStr).length,
-    [upcoming, todayStr]
-  );
-
-  const tooltipStyle = {
-    backgroundColor: dark ? "#0f172a" : "#ffffff",
-    border: `1px solid ${dark ? "#334155" : "#e2e8f0"}`,
-    borderRadius: "12px",
-    color: dark ? "#e2e8f0" : "#0f172a",
-  };
-
-  const axisTickColor = dark ? "#64748b" : "#94a3b8";
-  const axisMutedColor = dark ? "#475569" : "#cbd5e1";
-
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
@@ -175,17 +161,17 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-widest text-gray-400 dark:text-slate-500">
-              Dashboard Financeiro
+              Dashboard
             </p>
             <h1 className="mt-1 text-2xl font-semibold text-gray-900 dark:text-slate-100">
-              Controle Financeiro
+              Contas, faturas e gastos
             </h1>
           </div>
           <div className="flex items-center gap-3">
-            {overdueCount > 0 && (
+            {overduePayables.length > 0 && (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
                 <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
-                {overdueCount} vencida{overdueCount > 1 ? "s" : ""}
+                {overduePayables.length} vencida{overduePayables.length > 1 ? "s" : ""}
               </span>
             )}
             <MonthNavigator month={month} year={year} onChange={onMonthChange} />
@@ -202,33 +188,27 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
-              label="Saldo"
-              value={summary?.balance}
-              prevValue={prevSummary?.balance}
-              subtitle="vs mês anterior"
-              valueColor={Number(summary?.balance ?? 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}
-            />
-            <StatCard
-              label="Entradas"
-              value={summary?.total_income}
-              prevValue={prevSummary?.total_income}
-              subtitle="vs mês anterior"
-              valueColor="text-emerald-600 dark:text-emerald-400"
-            />
-            <StatCard
-              label="Pendente"
-              value={summary?.total_pending}
-              prevValue={prevSummary?.total_pending}
-              subtitle="vs mês anterior"
+              label="A vencer (7 dias)"
+              value={upcomingSum}
+              subtitle={`${upcoming.length} conta${upcoming.length === 1 ? "" : "s"}`}
               valueColor="text-amber-600 dark:text-amber-400"
-              invertDelta
             />
             <StatCard
-              label="Pago"
+              label="Vencidas"
+              value={overdueSum}
+              subtitle={`${overduePayables.length} conta${overduePayables.length === 1 ? "" : "s"}`}
+              valueColor="text-rose-600 dark:text-rose-400"
+            />
+            <StatCard
+              label="Faturas do mês"
+              value={billsSum}
+              subtitle={`${bills.length} fatura${bills.length === 1 ? "" : "s"}`}
+            />
+            <StatCard
+              label="Pago no mês"
               value={summary?.total_paid}
-              prevValue={prevSummary?.total_paid}
-              subtitle="vs mês anterior"
-              valueColor="text-gray-900 dark:text-slate-100"
+              subtitle="mês selecionado"
+              valueColor="text-emerald-600 dark:text-emerald-400"
             />
           </div>
         )}
@@ -343,27 +323,21 @@ export default function ConnectionPage({ month, year, onMonthChange }) {
           </div>
         </div>
 
-        {/* 6-month bar chart */}
-        {historyChartData.length > 0 && (
+        {/* Faturas de cartão */}
+        {bills.length > 0 && (
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h2 className="mb-1 text-sm font-semibold text-gray-900 dark:text-slate-100">Histórico — últimos 6 meses</h2>
-            <p className="mb-5 text-xs text-gray-400 dark:text-slate-500">Entradas vs Despesas</p>
-            <div className="h-52">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={historyChartData} barGap={4}>
-                  <XAxis dataKey="label" tick={{ fill: axisTickColor, fontSize: 12 }} axisLine={false} tickLine={false} />
-                  <YAxis tickFormatter={fmtShort} tick={{ fill: axisMutedColor, fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
-                  <Tooltip
-                    formatter={(v, name) => [fmt(v), name]}
-                    contentStyle={tooltipStyle}
-                    labelStyle={{ color: dark ? "#e2e8f0" : "#0f172a" }}
-                    itemStyle={{ color: dark ? "#e2e8f0" : "#374151" }}
-                  />
-                  <Legend wrapperStyle={{ color: axisTickColor, fontSize: 12 }} />
-                  <Bar dataKey="Entradas" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={28} />
-                  <Bar dataKey="Despesas" fill="#f87171" radius={[4, 4, 0, 0]} maxBarSize={28} />
-                </BarChart>
-              </ResponsiveContainer>
+            <h2 className="mb-4 text-sm font-semibold text-gray-900 dark:text-slate-100">Faturas de cartão</h2>
+            <div className="flex flex-col gap-3">
+              {bills.map((bill) => (
+                <div key={bill.id} className="flex items-center justify-between gap-2">
+                  <p className="text-sm text-gray-700 dark:text-slate-300">
+                    Vence em {new Date(`${bill.due_date}T00:00:00`).toLocaleDateString("pt-BR")}
+                  </p>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+                    {fmt(bill.total_amount)}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}

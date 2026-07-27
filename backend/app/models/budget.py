@@ -11,10 +11,15 @@ from app.db.database import Base
 class Budget(Base):
     __tablename__ = "budgets"
     __table_args__ = (
-        UniqueConstraint("category_id", "month", "year", name="uq_budget_category_month_year"),
+        UniqueConstraint(
+            "user_id", "category_id", "month", "year", name="uq_budget_user_category_month_year"
+        ),
     )
 
     id: Mapped[Uuid] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[Uuid] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     category_id: Mapped[Uuid] = mapped_column(
         Uuid, ForeignKey("categories.id"), nullable=False
     )

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import os
 import time
 
 import pluggy_sdk
+
+from app.core.config import settings
 
 _api_key: str | None = None
 _expires_at: float = 0
@@ -13,8 +14,8 @@ def get_api_client() -> pluggy_sdk.ApiClient:
     global _api_key, _expires_at
 
     if _api_key is None or time.time() >= _expires_at:
-        client_id = os.getenv("PLUGGY_CLIENT_ID")
-        client_secret = os.getenv("PLUGGY_CLIENT_SECRET")
+        client_id = settings.pluggy_client_id
+        client_secret = settings.pluggy_client_secret
         if not client_id or not client_secret:
             raise RuntimeError("PLUGGY_CLIENT_ID e PLUGGY_CLIENT_SECRET não configurados")
 

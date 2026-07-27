@@ -12,8 +12,8 @@ from app.models.payable import Payable, PayableStatus
 from app.schemas.payable import PayableCreate, PayableUpdate
 
 
-def create_payable(db: Session, payload: PayableCreate) -> Payable:
-    payable = Payable(**payload.model_dump())
+def create_payable(db: Session, user_id: UUID, payload: PayableCreate) -> Payable:
+    payable = Payable(user_id=user_id, **payload.model_dump())
     db.add(payable)
     db.commit()
     db.refresh(payable)
@@ -21,9 +21,9 @@ def create_payable(db: Session, payload: PayableCreate) -> Payable:
 
 
 def list_payables(
-    db: Session, month: Optional[int] = None, year: Optional[int] = None
+    db: Session, user_id: UUID, month: Optional[int] = None, year: Optional[int] = None
 ) -> Iterable[Payable]:
-    query = select(Payable)
+    query = select(Payable).where(Payable.user_id == user_id)
 
     if month is not None and year is not None:
         start_date = date(year, month, 1)
@@ -37,8 +37,10 @@ def list_payables(
     return result.scalars().all()
 
 
-def get_payable(db: Session, payable_id: UUID) -> Optional[Payable]:
-    return db.get(Payable, payable_id)
+def get_payable(db: Session, user_id: UUID, payable_id: UUID) -> Optional[Payable]:
+    return db.execute(
+        select(Payable).where(Payable.id == payable_id, Payable.user_id == user_id)
+    ).scalar_one_or_none()
 
 
 def update_payable(db: Session, payable: Payable, payload: PayableUpdate) -> Payable:

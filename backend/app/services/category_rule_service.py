@@ -10,8 +10,9 @@ from app.models.category_rule import CategoryRule
 from app.schemas.category_rule import CategoryRuleCreate
 
 
-def create_rule(db: Session, payload: CategoryRuleCreate) -> CategoryRule:
+def create_rule(db: Session, user_id: UUID, payload: CategoryRuleCreate) -> CategoryRule:
     rule = CategoryRule(
+        user_id=user_id,
         keyword=payload.keyword.strip().upper(),
         category_id=payload.category_id,
         priority=payload.priority,
@@ -22,15 +23,21 @@ def create_rule(db: Session, payload: CategoryRuleCreate) -> CategoryRule:
     return rule
 
 
-def list_rules(db: Session) -> List[CategoryRule]:
+def list_rules(db: Session, user_id: UUID) -> List[CategoryRule]:
     result = db.execute(
-        select(CategoryRule).order_by(CategoryRule.priority.desc(), CategoryRule.keyword.asc())
+        select(CategoryRule)
+        .where(CategoryRule.user_id == user_id)
+        .order_by(CategoryRule.priority.desc(), CategoryRule.keyword.asc())
     )
     return result.scalars().all()
 
 
-def get_rule(db: Session, rule_id: UUID) -> Optional[CategoryRule]:
-    return db.get(CategoryRule, rule_id)
+def get_rule(db: Session, user_id: UUID, rule_id: UUID) -> Optional[CategoryRule]:
+    return db.execute(
+        select(CategoryRule).where(
+            CategoryRule.id == rule_id, CategoryRule.user_id == user_id
+        )
+    ).scalar_one_or_none()
 
 
 def delete_rule(db: Session, rule: CategoryRule) -> None:
@@ -38,9 +45,9 @@ def delete_rule(db: Session, rule: CategoryRule) -> None:
     db.commit()
 
 
-def build_keyword_map(db: Session) -> dict[str, str]:
+def build_keyword_map(db: Session, user_id: UUID) -> dict[str, str]:
     """Returns {KEYWORD_UPPERCASE: str(category_id)} — highest priority keyword wins."""
-    rules = list_rules(db)
+    rules = list_rules(db, user_id)
     result: dict[str, str] = {}
     for rule in rules:
         if rule.keyword not in result:

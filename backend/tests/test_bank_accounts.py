@@ -11,17 +11,22 @@ import json
 
 import pytest
 
-from app.models.bank_account import BankAccount
+from app.models.bank_account import BankAccount, BankAccountSyncStatus
+from app.models.category import Category
+from app.models.payable import Payable, PayableStatus
 from app.models.transaction import Transaction, TransactionType
+from app.schemas.category_rule import CategoryRuleCreate
 from app.services import bank_sync_service
+from app.services.category_rule_service import create_rule
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_account(db, *, external_id: str | None = None) -> BankAccount:
+def _make_account(db, user, *, external_id: str | None = None) -> BankAccount:
     acc = BankAccount(
+        user_id=user.id,
         name="Conta Corrente",
         bank_name="Nubank",
         account_type="checking",
@@ -151,32 +156,55 @@ class TestConnectToken:
 
 class TestSyncEndpoint:
     @patch("app.api.endpoints.bank_accounts.bank_sync_service.sync_account")
-    def test_sync_returns_imported_skipped(self, mock_sync, client, db_session):
-        acc = _make_account(db_session, external_id=str(uuid4()))
-        mock_sync.return_value = {"imported": 5, "skipped": 2}
+    def test_sync_starts_background_job_and_returns_202(self, mock_sync, client, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        mock_sync.return_value = {
+            "imported": 5,
+            "skipped": 2,
+            "bills_synced": 0,
+            "auto_reconciled": 0,
+            "suggestions": [],
+        }
+        # TestClient roda a BackgroundTask de forma síncrona antes de devolver a
+        # resposta, então já dá pra conferir o estado final da conta aqui.
         r = client.post(f"/bank-accounts/{acc.id}/sync")
-        assert r.status_code == 200
-        assert r.json() == {"imported": 5, "skipped": 2}
+        assert r.status_code == 202
+
+        db_session.refresh(acc)
+        assert acc.sync_status == BankAccountSyncStatus.IDLE
+        assert acc.last_sync_error is None
 
     def test_sync_nonexistent_account_returns_404(self, client):
         r = client.post(f"/bank-accounts/{uuid4()}/sync")
         assert r.status_code == 404
 
-    @patch("app.api.endpoints.bank_accounts.bank_sync_service.sync_account")
-    def test_sync_without_external_id_returns_400(self, mock_sync, client, db_session):
-        acc = _make_account(db_session, external_id=None)
-        mock_sync.side_effect = ValueError("Conta sem item_id da Pluggy. Conecte o banco primeiro.")
+    def test_sync_without_external_id_returns_400(self, client, db_session, user):
+        acc = _make_account(db_session, user, external_id=None)
         r = client.post(f"/bank-accounts/{acc.id}/sync")
         assert r.status_code == 400
         assert "item_id" in r.json()["detail"]
 
-    @patch("app.api.endpoints.bank_accounts.bank_sync_service.sync_account")
-    def test_sync_pluggy_error_returns_502(self, mock_sync, client, db_session):
-        acc = _make_account(db_session, external_id=str(uuid4()))
-        mock_sync.side_effect = Exception("timeout da Pluggy")
+    def test_sync_already_syncing_is_idempotent(self, client, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        acc.sync_status = BankAccountSyncStatus.SYNCING
+        db_session.add(acc)
+        db_session.commit()
+
         r = client.post(f"/bank-accounts/{acc.id}/sync")
-        assert r.status_code == 502
-        assert "Pluggy" in r.json()["detail"]
+        assert r.status_code == 202
+        assert r.json()["sync_status"] == "SYNCING"
+
+    @patch("app.api.endpoints.bank_accounts.bank_sync_service.sync_account")
+    def test_sync_job_error_sets_error_status(self, mock_sync, client, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        mock_sync.side_effect = Exception("timeout da Pluggy")
+
+        r = client.post(f"/bank-accounts/{acc.id}/sync")
+        assert r.status_code == 202
+
+        db_session.refresh(acc)
+        assert acc.sync_status == BankAccountSyncStatus.ERROR
+        assert "timeout da Pluggy" in acc.last_sync_error
 
 
 # ---------------------------------------------------------------------------
@@ -191,8 +219,8 @@ class TestSyncAccountService:
         ctx.__exit__ = MagicMock(return_value=False)
         return ctx
 
-    def test_sync_imports_new_transactions(self, db_session):
-        acc = _make_account(db_session, external_id=str(uuid4()))
+    def test_sync_imports_new_transactions(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
 
         pluggy_acc = SimpleNamespace(id=str(uuid4()))
         tx1 = _pluggy_tx("tx-001", -150.0, "Supermercado", date(2026, 5, 1))
@@ -220,9 +248,10 @@ class TestSyncAccountService:
         assert "pluggy:tx-001" in sources
         assert "pluggy:tx-002" in sources
 
-    def test_sync_skips_duplicate_transactions(self, db_session):
-        acc = _make_account(db_session, external_id=str(uuid4()))
+    def test_sync_skips_duplicate_transactions(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
         existing = Transaction(
+            user_id=user.id,
             date=date(2026, 5, 1),
             description="Duplicado",
             amount=Decimal("50.00"),
@@ -248,8 +277,8 @@ class TestSyncAccountService:
         assert result["imported"] == 1
         assert result["skipped"] == 1
 
-    def test_sync_classifies_income_and_expense(self, db_session):
-        acc = _make_account(db_session, external_id=str(uuid4()))
+    def test_sync_classifies_income_and_expense(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
 
         pluggy_acc = SimpleNamespace(id=str(uuid4()))
         tx_expense = _pluggy_tx("tx-exp", -200.0, "Conta de água", date(2026, 5, 3))
@@ -270,8 +299,8 @@ class TestSyncAccountService:
         assert txs["pluggy:tx-exp"].amount == Decimal("200.00")
         assert txs["pluggy:tx-inc"].amount == Decimal("5000.00")
 
-    def test_sync_paginates_correctly(self, db_session):
-        acc = _make_account(db_session, external_id=str(uuid4()))
+    def test_sync_paginates_correctly(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
 
         pluggy_acc = SimpleNamespace(id=str(uuid4()))
         page1_txs = [_pluggy_tx(f"tx-p1-{i}", -10.0, f"Desc {i}", date(2026, 5, i + 1)) for i in range(3)]
@@ -298,8 +327,8 @@ class TestSyncAccountService:
         assert result["imported"] == 5
         assert call_count == 2
 
-    def test_sync_updates_last_sync_at(self, db_session):
-        acc = _make_account(db_session, external_id=str(uuid4()))
+    def test_sync_updates_last_sync_at(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
         assert acc.last_sync_at is None
 
         pluggy_acc = SimpleNamespace(id=str(uuid4()))
@@ -316,13 +345,13 @@ class TestSyncAccountService:
         db_session.refresh(acc)
         assert acc.last_sync_at is not None
 
-    def test_sync_without_external_id_raises(self, db_session):
-        acc = _make_account(db_session, external_id=None)
+    def test_sync_without_external_id_raises(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=None)
         with pytest.raises(ValueError, match="item_id"):
             bank_sync_service.sync_account(db_session, acc)
 
-    def test_sync_truncates_long_description(self, db_session):
-        acc = _make_account(db_session, external_id=str(uuid4()))
+    def test_sync_truncates_long_description(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
 
         pluggy_acc = SimpleNamespace(id=str(uuid4()))
         long_desc = "X" * 300
@@ -339,3 +368,90 @@ class TestSyncAccountService:
 
         saved = db_session.query(Transaction).first()
         assert len(saved.description) == 255
+
+    def test_sync_categorizes_by_keyword_rule(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        cat = Category(user_id=user.id, name="Supermercado", color_hex="#00FF00")
+        db_session.add(cat)
+        db_session.commit()
+        db_session.refresh(cat)
+        create_rule(db_session, user.id, CategoryRuleCreate(keyword="pao de acucar", category_id=cat.id))
+
+        pluggy_acc = SimpleNamespace(id=str(uuid4()))
+        tx = _pluggy_tx("tx-cat", -150.0, "Pao de Acucar Compra", date(2026, 5, 1))
+
+        with (
+            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
+        ):
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([tx])
+
+            bank_sync_service.sync_account(db_session, acc)
+
+        saved = db_session.query(Transaction).filter_by(source="pluggy:tx-cat").one()
+        assert str(saved.category_id) == str(cat.id)
+
+    def test_sync_auto_reconciles_exact_match(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        payable = Payable(
+            user_id=user.id,
+            title="Internet",
+            amount=Decimal("99.90"),
+            due_date=date(2026, 5, 10),
+            status=PayableStatus.PENDING,
+        )
+        db_session.add(payable)
+        db_session.commit()
+        db_session.refresh(payable)
+
+        pluggy_acc = SimpleNamespace(id=str(uuid4()))
+        tx = _pluggy_tx("tx-exact", -99.90, "Pagto Internet", date(2026, 5, 10))
+
+        with (
+            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
+        ):
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([tx])
+
+            result = bank_sync_service.sync_account(db_session, acc)
+
+        # Match exato (confidence 1.0 e único) é auto-reconciliado — não sobra para revisão manual.
+        assert result["auto_reconciled"] == 1
+        assert result["suggestions"] == []
+
+        db_session.refresh(payable)
+        assert payable.status == PayableStatus.PAID
+
+    def test_sync_keeps_ambiguous_suggestions_for_manual_review(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        payable = Payable(
+            user_id=user.id,
+            title="Internet",
+            amount=Decimal("99.90"),
+            due_date=date(2026, 5, 15),
+            status=PayableStatus.PENDING,
+        )
+        db_session.add(payable)
+        db_session.commit()
+        db_session.refresh(payable)
+
+        pluggy_acc = SimpleNamespace(id=str(uuid4()))
+        tx = _pluggy_tx("tx-ambig", -99.90, "Pagto Internet", date(2026, 5, 10))
+
+        with (
+            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
+        ):
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([tx])
+
+            result = bank_sync_service.sync_account(db_session, acc)
+
+        # Valor exato mas data fora (0.8) — não é auto-confirmado, fica para revisão manual.
+        assert len(result["suggestions"]) == 1
+        assert result["suggestions"][0].confidence_score == 0.8
+
+        db_session.refresh(payable)
+        assert payable.status == PayableStatus.PENDING

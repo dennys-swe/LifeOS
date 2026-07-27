@@ -1,24 +1,28 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import date, timedelta
 from typing import List
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.payable import Payable, PayableStatus
 from app.models.push_subscription import PushSubscription
 from app.schemas.push_subscription import PushSubscriptionCreate
 
 
-def save_subscription(db: Session, payload: PushSubscriptionCreate) -> PushSubscription:
+def save_subscription(
+    db: Session, user_id: UUID, payload: PushSubscriptionCreate
+) -> PushSubscription:
     existing = db.execute(
         select(PushSubscription).where(PushSubscription.endpoint == payload.endpoint)
     ).scalar_one_or_none()
 
     if existing:
+        existing.user_id = user_id
         existing.p256dh = payload.p256dh
         existing.auth = payload.auth
         db.add(existing)
@@ -26,14 +30,14 @@ def save_subscription(db: Session, payload: PushSubscriptionCreate) -> PushSubsc
         db.refresh(existing)
         return existing
 
-    sub = PushSubscription(**payload.model_dump())
+    sub = PushSubscription(user_id=user_id, **payload.model_dump())
     db.add(sub)
     db.commit()
     db.refresh(sub)
     return sub
 
 
-def send_upcoming_notifications(db: Session, days: int = 3) -> int:
+def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> int:
     """
     Sends push notifications for upcoming payables.
     Requires VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY, VAPID_CLAIMS_EMAIL env vars.
@@ -44,8 +48,8 @@ def send_upcoming_notifications(db: Session, days: int = 3) -> int:
     except ImportError:
         raise RuntimeError("pywebpush not installed. Add it to requirements.txt.")
 
-    vapid_private = os.getenv("VAPID_PRIVATE_KEY")
-    vapid_claims_email = os.getenv("VAPID_CLAIMS_EMAIL", "mailto:admin@example.com")
+    vapid_private = settings.vapid_private_key
+    vapid_claims_email = settings.vapid_claims_email or "mailto:admin@example.com"
 
     if not vapid_private:
         raise RuntimeError("VAPID_PRIVATE_KEY environment variable not set.")
@@ -54,6 +58,7 @@ def send_upcoming_notifications(db: Session, days: int = 3) -> int:
     until = today + timedelta(days=days)
     upcoming = db.execute(
         select(Payable).where(
+            Payable.user_id == user_id,
             Payable.status == PayableStatus.PENDING,
             Payable.due_date >= today,
             Payable.due_date <= until,
@@ -64,7 +69,7 @@ def send_upcoming_notifications(db: Session, days: int = 3) -> int:
         return 0
 
     subscriptions: List[PushSubscription] = db.execute(
-        select(PushSubscription)
+        select(PushSubscription).where(PushSubscription.user_id == user_id)
     ).scalars().all()
 
     titles = [p.title for p in upcoming[:3]]

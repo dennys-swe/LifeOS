@@ -4,6 +4,7 @@ from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,12 +20,13 @@ _UNCATEGORIZED_NAME = "Sem categoria"
 _UNCATEGORIZED_COLOR = "#64748B"
 
 
-def get_summary(db: Session, month: int, year: int) -> SummaryResponse:
+def get_summary(db: Session, user_id: UUID, month: int, year: int) -> SummaryResponse:
     start_date = date(year, month, 1)
     end_date = date(year, month, monthrange(year, month)[1])
 
     payables = db.execute(
         select(Payable).where(
+            Payable.user_id == user_id,
             Payable.due_date >= start_date,
             Payable.due_date <= end_date,
         )
@@ -32,12 +34,16 @@ def get_summary(db: Session, month: int, year: int) -> SummaryResponse:
 
     transactions = db.execute(
         select(Transaction).where(
+            Transaction.user_id == user_id,
             Transaction.date >= start_date,
             Transaction.date <= end_date,
         )
     ).scalars().all()
 
-    categories = {cat.id: cat for cat in db.execute(select(Category)).scalars().all()}
+    categories = {
+        cat.id: cat
+        for cat in db.execute(select(Category).where(Category.user_id == user_id)).scalars().all()
+    }
 
     total_income = Decimal("0")
     total_expenses = Decimal("0")
@@ -63,7 +69,7 @@ def get_summary(db: Session, month: int, year: int) -> SummaryResponse:
             total_expenses += Decimal(str(t.amount))
 
     all_keys = set(payables_by_category.keys()) | set(transactions_by_category.keys())
-    budget_map = build_budget_map(db, month=month, year=year)
+    budget_map = build_budget_map(db, user_id=user_id, month=month, year=year)
 
     by_category = []
     for key in all_keys:
@@ -103,7 +109,7 @@ def get_summary(db: Session, month: int, year: int) -> SummaryResponse:
     )
 
 
-def get_history(db: Session, months: int = 6) -> HistoryResponse:
+def get_history(db: Session, user_id: UUID, months: int = 6) -> HistoryResponse:
     today = date.today()
     result = []
     for i in range(months - 1, -1, -1):
@@ -112,7 +118,7 @@ def get_history(db: Session, months: int = 6) -> HistoryResponse:
         while m <= 0:
             m += 12
             y -= 1
-        s = get_summary(db, month=m, year=y)
+        s = get_summary(db, user_id=user_id, month=m, year=y)
         result.append(MonthSummary(
             month=m,
             year=y,

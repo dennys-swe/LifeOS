@@ -12,6 +12,9 @@ class CategoryRule(Base):
     __tablename__ = "category_rules"
 
     id: Mapped[Uuid] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[Uuid] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     keyword: Mapped[str] = mapped_column(String(100), nullable=False)
     category_id: Mapped[Uuid] = mapped_column(
         Uuid, ForeignKey("categories.id"), nullable=False

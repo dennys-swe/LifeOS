@@ -1,4 +1,3 @@
-import io
 import uuid
 
 from app.models.category import Category
@@ -6,46 +5,54 @@ from app.schemas.category_rule import CategoryRuleCreate
 from app.services.category_rule_service import build_keyword_map, create_rule, list_rules
 
 
-def _make_category(db_session, name="Mercado", color="#00FF00"):
-    cat = Category(id=uuid.uuid4(), name=name, color_hex=color)
+def _make_category(db_session, user, name="Mercado", color="#00FF00"):
+    cat = Category(id=uuid.uuid4(), user_id=user.id, name=name, color_hex=color)
     db_session.add(cat)
     db_session.commit()
     db_session.refresh(cat)
     return cat
 
 
-def test_create_rule_normalizes_keyword(db_session):
-    cat = _make_category(db_session)
-    rule = create_rule(db_session, CategoryRuleCreate(keyword="supermercado", category_id=cat.id))
+def test_create_rule_normalizes_keyword(db_session, user):
+    cat = _make_category(db_session, user)
+    rule = create_rule(db_session, user.id, CategoryRuleCreate(keyword="supermercado", category_id=cat.id))
     assert rule.keyword == "SUPERMERCADO"
+    assert rule.user_id == user.id
 
 
-def test_create_rule_strips_whitespace(db_session):
-    cat = _make_category(db_session)
-    rule = create_rule(db_session, CategoryRuleCreate(keyword="  padaria  ", category_id=cat.id))
+def test_create_rule_strips_whitespace(db_session, user):
+    cat = _make_category(db_session, user)
+    rule = create_rule(db_session, user.id, CategoryRuleCreate(keyword="  padaria  ", category_id=cat.id))
     assert rule.keyword == "PADARIA"
 
 
-def test_build_keyword_map_correct_dict(db_session):
-    cat = _make_category(db_session, "Alimentação")
-    create_rule(db_session, CategoryRuleCreate(keyword="restaurante", category_id=cat.id))
-    kmap = build_keyword_map(db_session)
+def test_build_keyword_map_correct_dict(db_session, user):
+    cat = _make_category(db_session, user, "Alimentação")
+    create_rule(db_session, user.id, CategoryRuleCreate(keyword="restaurante", category_id=cat.id))
+    kmap = build_keyword_map(db_session, user.id)
     assert "RESTAURANTE" in kmap
     assert kmap["RESTAURANTE"] == str(cat.id)
 
 
-def test_build_keyword_map_respects_priority(db_session):
-    cat_low = _make_category(db_session, "Low", "#111111")
-    cat_high = _make_category(db_session, "High", "#222222")
-    create_rule(db_session, CategoryRuleCreate(keyword="comum", category_id=cat_low.id, priority=0))
-    create_rule(db_session, CategoryRuleCreate(keyword="comum", category_id=cat_high.id, priority=10))
-    kmap = build_keyword_map(db_session)
+def test_build_keyword_map_respects_priority(db_session, user):
+    cat_low = _make_category(db_session, user, "Low", "#111111")
+    cat_high = _make_category(db_session, user, "High", "#222222")
+    create_rule(db_session, user.id, CategoryRuleCreate(keyword="comum", category_id=cat_low.id, priority=0))
+    create_rule(db_session, user.id, CategoryRuleCreate(keyword="comum", category_id=cat_high.id, priority=10))
+    kmap = build_keyword_map(db_session, user.id)
     # Higher priority wins — dict insertion order preserves ORDER BY priority DESC
     assert kmap["COMUM"] == str(cat_high.id)
 
 
-def test_create_rule_via_api(client, db_session):
-    cat = _make_category(db_session, "Transporte")
+def test_build_keyword_map_excludes_other_users(db_session, user, other_user):
+    cat = _make_category(db_session, other_user, "Alimentação")
+    create_rule(db_session, other_user.id, CategoryRuleCreate(keyword="restaurante", category_id=cat.id))
+    kmap = build_keyword_map(db_session, user.id)
+    assert kmap == {}
+
+
+def test_create_rule_via_api(client, db_session, user):
+    cat = _make_category(db_session, user, "Transporte")
     response = client.post("/category-rules", json={
         "keyword": "uber",
         "category_id": str(cat.id),
@@ -57,8 +64,8 @@ def test_create_rule_via_api(client, db_session):
     assert data["id"]
 
 
-def test_list_rules(client, db_session):
-    cat = _make_category(db_session)
+def test_list_rules(client, db_session, user):
+    cat = _make_category(db_session, user)
     client.post("/category-rules", json={"keyword": "ifood", "category_id": str(cat.id)})
     client.post("/category-rules", json={"keyword": "rappi", "category_id": str(cat.id)})
     response = client.get("/category-rules")
@@ -68,8 +75,8 @@ def test_list_rules(client, db_session):
     assert "RAPPI" in keywords
 
 
-def test_delete_rule(client, db_session):
-    cat = _make_category(db_session)
+def test_delete_rule(client, db_session, user):
+    cat = _make_category(db_session, user)
     create_resp = client.post("/category-rules", json={"keyword": "farmacia", "category_id": str(cat.id)})
     rule_id = create_resp.json()["id"]
     del_resp = client.delete(f"/category-rules/{rule_id}")
@@ -84,18 +91,6 @@ def test_delete_rule_not_found(client):
     assert response.status_code == 404
 
 
-def test_upload_uses_db_rules(client, db_session):
-    cat = _make_category(db_session, "Supermercado")
-    create_rule(db_session, CategoryRuleCreate(keyword="pao de acucar", category_id=cat.id))
-
-    csv_content = "Data,Descricao,Valor\n10/05/2026,Pao de Acucar Compra,-150.00\n"
-    csv_bytes = csv_content.encode()
-
-    response = client.post(
-        "/transactions/upload",
-        files={"file": ("extrato.csv", io.BytesIO(csv_bytes), "text/csv")},
-    )
-    assert response.status_code == 201
-    data = response.json()
-    assert len(data["transactions"]) == 1
-    assert data["transactions"][0]["category_id"] == str(cat.id)
+# Cobertura de categorização automática por keyword foi movida para
+# test_bank_accounts.py::TestSyncAccountService::test_sync_categorizes_by_keyword_rule
+# (import de extrato manual foi removido em favor de sincronização via Pluggy).

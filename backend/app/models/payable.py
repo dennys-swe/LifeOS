@@ -19,6 +19,9 @@ class Payable(Base):
     __tablename__ = "payables"
 
     id: Mapped[Uuid] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[Uuid] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     amount: Mapped[Numeric] = mapped_column(Numeric(12, 2), nullable=False)
     due_date: Mapped[Date] = mapped_column(Date, nullable=False)

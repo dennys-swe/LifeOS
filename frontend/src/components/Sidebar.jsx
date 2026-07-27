@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
+import { NavLink } from "react-router";
 import api from "../services/api";
+import { useAuth } from "../context/AuthContext";
 import { useFinance } from "../context/FinanceContext";
 import { useTheme } from "../context/ThemeContext";
-import { PAGES } from "../pages";
-
-// PAGES is defined in src/pages.js to keep this file components-only (react-refresh).
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -65,21 +64,42 @@ function IconMoon({ className }) {
   );
 }
 
+function IconLogout({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 9V5.25A2.25 2.25 0 0 1 10.5 3h6a2.25 2.25 0 0 1 2.25 2.25v13.5A2.25 2.25 0 0 1 16.5 21h-6a2.25 2.25 0 0 1-2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3H21" />
+    </svg>
+  );
+}
+
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { key: PAGES.dashboard, label: "Início", Icon: IconHome },
-  { key: PAGES.payables, label: "Contas", Icon: IconList, showBadge: true },
-  { key: PAGES.transactions, label: "Transações", Icon: IconArrows },
-  { key: PAGES.banks, label: "Bancos", Icon: IconBank },
-  { key: PAGES.settings, label: "Configurações", Icon: IconSettings },
+  { to: "/", end: true, label: "Dashboard", Icon: IconHome },
+  { to: "/payables", label: "Contas", Icon: IconList, showBadge: true },
+  { to: "/transactions", label: "Extrato", Icon: IconArrows },
+  { to: "/banks", label: "Contas Bancárias", Icon: IconBank },
+  { to: "/settings", label: "Ajustes", Icon: IconSettings },
 ];
+
+const linkClass = ({ isActive }) =>
+  `relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+    isActive
+      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+      : "text-gray-600 hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-900"
+  }`;
+
+const mobileLinkClass = ({ isActive }) =>
+  `relative flex flex-1 flex-col items-center gap-1 py-2 ${
+    isActive ? "text-emerald-600 dark:text-emerald-400" : "text-gray-400 dark:text-slate-500"
+  }`;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function Sidebar({ activePage, onNavigate }) {
+export default function Sidebar() {
   const { refresh } = useFinance() ?? {};
   const { dark, toggle } = useTheme();
+  const { user, logout } = useAuth();
   const [upcomingCount, setUpcomingCount] = useState(0);
 
   useEffect(() => {
@@ -107,19 +127,9 @@ export default function Sidebar({ activePage, onNavigate }) {
         {/* Nav items */}
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-4">
           {NAV_ITEMS.map((navItem) => {
-            const active = activePage === navItem.key;
             const badge = navItem.showBadge && upcomingCount > 0;
             return (
-              <button
-                key={navItem.key}
-                type="button"
-                onClick={() => onNavigate(navItem.key)}
-                className={`relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                  active
-                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
-                    : "text-gray-600 hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-900"
-                }`}
-              >
+              <NavLink key={navItem.to} to={navItem.to} end={navItem.end} className={linkClass}>
                 <navItem.Icon className="h-5 w-5 flex-shrink-0" />
                 <span>{navItem.label}</span>
                 {badge && (
@@ -127,13 +137,18 @@ export default function Sidebar({ activePage, onNavigate }) {
                     {upcomingCount > 9 ? "9+" : upcomingCount}
                   </span>
                 )}
-              </button>
+              </NavLink>
             );
           })}
         </nav>
 
-        {/* Theme toggle */}
+        {/* User + Theme toggle */}
         <div className="border-t border-gray-200 p-3 dark:border-slate-800">
+          {user && (
+            <p className="truncate px-3 pb-2 text-xs text-gray-400 dark:text-slate-500" title={user.email}>
+              {user.email}
+            </p>
+          )}
           <button
             type="button"
             onClick={toggle}
@@ -141,6 +156,14 @@ export default function Sidebar({ activePage, onNavigate }) {
           >
             {dark ? <IconSun className="h-5 w-5" /> : <IconMoon className="h-5 w-5" />}
             <span>{dark ? "Tema claro" : "Tema escuro"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={logout}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-900"
+          >
+            <IconLogout className="h-5 w-5" />
+            <span>Sair</span>
           </button>
         </div>
       </aside>
@@ -153,41 +176,38 @@ export default function Sidebar({ activePage, onNavigate }) {
           </div>
           <span className="text-sm font-semibold text-gray-900 dark:text-slate-100">LifeOS</span>
         </div>
-        <button
-          type="button"
-          onClick={toggle}
-          className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-900"
-        >
-          {dark ? <IconSun className="h-5 w-5" /> : <IconMoon className="h-5 w-5" />}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={toggle}
+            className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-900"
+          >
+            {dark ? <IconSun className="h-5 w-5" /> : <IconMoon className="h-5 w-5" />}
+          </button>
+          <button
+            type="button"
+            onClick={logout}
+            className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-900"
+          >
+            <IconLogout className="h-5 w-5" />
+          </button>
+        </div>
       </header>
 
       {/* Mobile bottom nav */}
       <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-gray-200 bg-white dark:border-slate-800 dark:bg-slate-950 md:hidden">
         {NAV_ITEMS.map((navItem) => {
-          const active = activePage === navItem.key;
           const badge = navItem.showBadge && upcomingCount > 0;
           return (
-            <button
-              key={navItem.key}
-              type="button"
-              onClick={() => onNavigate(navItem.key)}
-              className="relative flex flex-1 flex-col items-center gap-1 py-2"
-            >
-              <navItem.Icon
-                className={`h-5 w-5 ${active ? "text-emerald-600 dark:text-emerald-400" : "text-gray-400 dark:text-slate-500"}`}
-              />
-              <span
-                className={`text-[10px] font-medium ${active ? "text-emerald-600 dark:text-emerald-400" : "text-gray-400 dark:text-slate-500"}`}
-              >
-                {navItem.label}
-              </span>
+            <NavLink key={navItem.to} to={navItem.to} end={navItem.end} className={mobileLinkClass}>
+              <navItem.Icon className="h-5 w-5" />
+              <span className="text-[10px] font-medium">{navItem.label}</span>
               {badge && (
                 <span className="absolute right-3 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-rose-500 text-[8px] font-bold text-white">
                   {upcomingCount > 9 ? "9+" : upcomingCount}
                 </span>
               )}
-            </button>
+            </NavLink>
           );
         })}
       </nav>

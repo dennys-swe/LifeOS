@@ -13,6 +13,9 @@ class RecurringPayable(Base):
     __tablename__ = "recurring_payables"
 
     id: Mapped[Uuid] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[Uuid] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     amount: Mapped[Numeric] = mapped_column(Numeric(12, 2), nullable=False)
     day_of_month: Mapped[int] = mapped_column(Integer, nullable=False)

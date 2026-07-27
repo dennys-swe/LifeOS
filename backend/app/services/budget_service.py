@@ -11,22 +11,27 @@ from app.models.budget import Budget
 from app.schemas.budget import BudgetCreate
 
 
-def list_budgets(db: Session, month: int, year: int) -> List[Budget]:
+def list_budgets(db: Session, user_id: UUID, month: int, year: int) -> List[Budget]:
     result = db.execute(
-        select(Budget).where(Budget.month == month, Budget.year == year)
+        select(Budget).where(
+            Budget.user_id == user_id, Budget.month == month, Budget.year == year
+        )
     )
     return result.scalars().all()
 
 
-def get_budget(db: Session, budget_id: UUID) -> Optional[Budget]:
-    return db.get(Budget, budget_id)
+def get_budget(db: Session, user_id: UUID, budget_id: UUID) -> Optional[Budget]:
+    return db.execute(
+        select(Budget).where(Budget.id == budget_id, Budget.user_id == user_id)
+    ).scalar_one_or_none()
 
 
 def get_budget_for_category(
-    db: Session, category_id: UUID, month: int, year: int
+    db: Session, user_id: UUID, category_id: UUID, month: int, year: int
 ) -> Optional[Budget]:
     return db.execute(
         select(Budget).where(
+            Budget.user_id == user_id,
             Budget.category_id == category_id,
             Budget.month == month,
             Budget.year == year,
@@ -34,9 +39,9 @@ def get_budget_for_category(
     ).scalar_one_or_none()
 
 
-def create_or_update_budget(db: Session, payload: BudgetCreate) -> Budget:
+def create_or_update_budget(db: Session, user_id: UUID, payload: BudgetCreate) -> Budget:
     existing = get_budget_for_category(
-        db, payload.category_id, payload.month, payload.year
+        db, user_id, payload.category_id, payload.month, payload.year
     )
     if existing:
         existing.limit_amount = payload.limit_amount
@@ -45,7 +50,7 @@ def create_or_update_budget(db: Session, payload: BudgetCreate) -> Budget:
         db.refresh(existing)
         return existing
 
-    budget = Budget(**payload.model_dump())
+    budget = Budget(user_id=user_id, **payload.model_dump())
     db.add(budget)
     db.commit()
     db.refresh(budget)
@@ -57,7 +62,7 @@ def delete_budget(db: Session, budget: Budget) -> None:
     db.commit()
 
 
-def build_budget_map(db: Session, month: int, year: int) -> dict[UUID, Decimal]:
-    """Returns {category_id: limit_amount} for the given month/year."""
-    budgets = list_budgets(db, month, year)
+def build_budget_map(db: Session, user_id: UUID, month: int, year: int) -> dict[UUID, Decimal]:
+    """Returns {category_id: limit_amount} for the given user/month/year."""
+    budgets = list_budgets(db, user_id, month, year)
     return {b.category_id: Decimal(str(b.limit_amount)) for b in budgets}

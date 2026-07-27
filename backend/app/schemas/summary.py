@@ -18,6 +18,8 @@ class CategorySummary(BaseModel):
 
 
 class SummaryResponse(BaseModel):
+    # total_income/total_expenses/balance ficam por compatibilidade — o dashboard
+    # (Fase 4) não consome mais fluxo de caixa, só total_pending/total_paid/by_category.
     total_income: Decimal
     total_expenses: Decimal
     total_pending: Decimal

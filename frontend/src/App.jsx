@@ -1,70 +1,59 @@
-import { useState } from "react";
+import { Navigate, Route, Routes, useOutletContext } from "react-router";
 
 import { ThemeProvider } from "./context/ThemeContext";
-import { FinanceProvider } from "./context/FinanceContext";
-import Sidebar from "./components/Sidebar";
-import { PAGES } from "./pages";
-import ConnectionPage from "./pages/ConnectionPage";
+import { AuthProvider } from "./context/AuthContext";
+import ProtectedLayout from "./components/ProtectedLayout";
+import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
+import DashboardPage from "./pages/DashboardPage";
 import PayablesPage from "./pages/PayablesPage";
 import TransactionsPage from "./pages/TransactionsPage";
 import BankAccountsPage from "./pages/BankAccountsPage";
 import SettingsPage from "./pages/SettingsPage";
-import UploadPage from "./pages/UploadPage";
-import FabModal from "./components/FabModal";
+
+function DashboardRoute() {
+  const { month, year, onMonthChange } = useOutletContext();
+  return <DashboardPage month={month} year={year} onMonthChange={onMonthChange} />;
+}
+
+function PayablesRoute() {
+  const { month, year, onMonthChange, payablesFilter, onPayablesFilterChange } =
+    useOutletContext();
+  return (
+    <PayablesPage
+      filter={payablesFilter}
+      onFilterChange={onPayablesFilterChange}
+      month={month}
+      year={year}
+      onMonthChange={onMonthChange}
+    />
+  );
+}
+
+function TransactionsRoute() {
+  const { month, year, onMonthChange } = useOutletContext();
+  return <TransactionsPage month={month} year={year} onMonthChange={onMonthChange} />;
+}
 
 export default function App() {
-  const [activePage, setActivePage] = useState(PAGES.dashboard);
-  const [payablesFilter, setPayablesFilter] = useState("all");
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-
-  const handleMonthChange = (month, year) => {
-    setSelectedMonth(month);
-    setSelectedYear(year);
-  };
-
   return (
     <ThemeProvider>
-      <div className="flex min-h-screen bg-gray-50 dark:bg-slate-950">
-        <FinanceProvider month={selectedMonth} year={selectedYear}>
-          <Sidebar activePage={activePage} onNavigate={setActivePage} />
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
 
-          <main className="flex-1 overflow-x-hidden md:ml-60">
-            {activePage === PAGES.dashboard && (
-              <ConnectionPage
-                month={selectedMonth}
-                year={selectedYear}
-                onMonthChange={handleMonthChange}
-              />
-            )}
-            {activePage === PAGES.payables && (
-              <PayablesPage
-                filter={payablesFilter}
-                onFilterChange={setPayablesFilter}
-                month={selectedMonth}
-                year={selectedYear}
-                onMonthChange={handleMonthChange}
-              />
-            )}
-            {activePage === PAGES.transactions && (
-              <TransactionsPage
-                month={selectedMonth}
-                year={selectedYear}
-                onMonthChange={handleMonthChange}
-              />
-            )}
-            {activePage === PAGES.banks && (
-              <BankAccountsPage onNavigateUpload={() => setActivePage("upload")} />
-            )}
-            {activePage === PAGES.settings && <SettingsPage />}
-            {activePage === "upload" && (
-              <UploadPage onNavigate={setActivePage} />
-            )}
-          </main>
+          <Route element={<ProtectedLayout />}>
+            <Route path="/" element={<DashboardRoute />} />
+            <Route path="/payables" element={<PayablesRoute />} />
+            <Route path="/transactions" element={<TransactionsRoute />} />
+            <Route path="/banks" element={<BankAccountsPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Route>
 
-          <FabModal />
-        </FinanceProvider>
-      </div>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

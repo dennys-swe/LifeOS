@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date
-from typing import Iterable, List, Optional
+from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -12,19 +12,8 @@ from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate
 
 
-def create_transactions(db: Session, payloads: Iterable[TransactionCreate]) -> List[Transaction]:
-    items = [Transaction(**payload.model_dump()) for payload in payloads]
-    if not items:
-        return []
-    db.add_all(items)
-    db.commit()
-    for item in items:
-        db.refresh(item)
-    return items
-
-
-def create_transaction(db: Session, payload: TransactionCreate) -> Transaction:
-    item = Transaction(**payload.model_dump())
+def create_transaction(db: Session, user_id: UUID, payload: TransactionCreate) -> Transaction:
+    item = Transaction(user_id=user_id, **payload.model_dump())
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -33,13 +22,14 @@ def create_transaction(db: Session, payload: TransactionCreate) -> Transaction:
 
 def get_transactions(
     db: Session,
+    user_id: UUID,
     tx_type: Optional[TransactionType] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     month: Optional[int] = None,
     year: Optional[int] = None,
 ) -> List[Transaction]:
-    query = select(Transaction)
+    query = select(Transaction).where(Transaction.user_id == user_id)
 
     if month is not None and year is not None:
         start_date = date(year, month, 1)
@@ -58,8 +48,12 @@ def get_transactions(
     return result.scalars().all()
 
 
-def get_transaction(db: Session, transaction_id: UUID) -> Optional[Transaction]:
-    return db.get(Transaction, transaction_id)
+def get_transaction(db: Session, user_id: UUID, transaction_id: UUID) -> Optional[Transaction]:
+    return db.execute(
+        select(Transaction).where(
+            Transaction.id == transaction_id, Transaction.user_id == user_id
+        )
+    ).scalar_one_or_none()
 
 
 def delete_transaction(db: Session, transaction: Transaction) -> None:

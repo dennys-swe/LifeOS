@@ -10,6 +10,10 @@ class CategoryBase(BaseModel):
     color_hex: str = Field(min_length=4, max_length=7)
 
 
+class CategoryCreate(CategoryBase):
+    pass
+
+
 class CategoryResponse(CategoryBase):
     model_config = ConfigDict(from_attributes=True)
 

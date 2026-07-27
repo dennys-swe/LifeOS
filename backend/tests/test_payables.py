@@ -5,7 +5,7 @@ from app.schemas.payable import PayableCreate
 from app.services.payable_service import create_payable, is_due_today, is_overdue
 
 
-def test_create_payable(db_session):
+def test_create_payable(db_session, user):
     payload = PayableCreate(
         title="Internet",
         amount=120.50,
@@ -14,9 +14,10 @@ def test_create_payable(db_session):
         payment_date=None,
     )
 
-    payable = create_payable(db_session, payload)
+    payable = create_payable(db_session, user.id, payload)
 
     assert payable.id is not None
+    assert payable.user_id == user.id
     assert payable.title == payload.title
     assert payable.amount == payload.amount
     assert payable.status == PayableStatus.PENDING

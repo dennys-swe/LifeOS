@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import List
 from uuid import UUID
 
 from pydantic import BaseModel
-
-from app.schemas.transaction import TransactionResponse
 
 
 class ReconciliationSuggestionResponse(BaseModel):
@@ -17,8 +14,3 @@ class ReconciliationSuggestionResponse(BaseModel):
     payable_amount: Decimal
     transaction_description: str
     transaction_amount: Decimal
-
-
-class UploadResponse(BaseModel):
-    transactions: List[TransactionResponse]
-    suggestions: List[ReconciliationSuggestionResponse]
