@@ -121,6 +121,147 @@ class TestBankAccountCRUD:
         r = client.delete(f"/bank-accounts/{uuid4()}")
         assert r.status_code == 404
 
+    def test_rename(self, client):
+        r = client.post("/bank-accounts", json={"name": "MeuPluggy", "bank_name": "MeuPluggy"})
+        acc_id = r.json()["id"]
+
+        r2 = client.patch(f"/bank-accounts/{acc_id}", json={"name": "Nubank", "bank_name": "Nu"})
+        assert r2.status_code == 200
+        assert r2.json()["name"] == "Nubank"
+        assert r2.json()["bank_name"] == "Nu"
+
+    def test_rename_partial_keeps_other_fields(self, client):
+        r = client.post("/bank-accounts", json={"name": "A", "bank_name": "Banco B"})
+        acc_id = r.json()["id"]
+
+        r2 = client.patch(f"/bank-accounts/{acc_id}", json={"name": "Novo"})
+        assert r2.status_code == 200
+        assert r2.json()["name"] == "Novo"
+        assert r2.json()["bank_name"] == "Banco B"
+
+    def test_rename_nonexistent_returns_404(self, client):
+        r = client.patch(f"/bank-accounts/{uuid4()}", json={"name": "X"})
+        assert r.status_code == 404
+
+    def test_rename_rejects_empty_name(self, client):
+        r = client.post("/bank-accounts", json={"name": "A", "bank_name": "B"})
+        acc_id = r.json()["id"]
+
+        r2 = client.patch(f"/bank-accounts/{acc_id}", json={"name": ""})
+        assert r2.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Derivação do nome — com o conector MeuPluggy o frontend só conhece
+# connector.name == "MeuPluggy", igual para todo banco conectado.
+# ---------------------------------------------------------------------------
+
+class TestNameDerivation:
+    def _ctx(self):
+        ctx = MagicMock()
+        ctx.__enter__ = MagicMock(return_value=ctx)
+        ctx.__exit__ = MagicMock(return_value=False)
+        return ctx
+
+    def _pluggy_acct(self, name, acct_type="CREDIT", marketing_name=None):
+        # marketing_name vem None no proxy do MeuPluggy — o nome útil está em `name`.
+        return SimpleNamespace(
+            id=str(uuid4()), name=name, marketing_name=marketing_name, type=acct_type
+        )
+
+    def _connect(self, client, accounts):
+        with (
+            patch("app.services.bank_sync_service.get_api_client", return_value=self._ctx()),
+            patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
+        ):
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+                results=accounts
+            )
+            return client.post("/bank-accounts", json={"external_id": str(uuid4())})
+
+    def test_derives_name_from_single_account(self, client):
+        r = self._connect(client, [self._pluggy_acct("banco-x", "BANK")])
+
+        assert r.status_code == 201
+        assert r.json()["name"] == "banco-x"
+        assert r.json()["bank_name"] == "banco-x"
+
+    def test_marketing_name_wins_when_present(self, client):
+        r = self._connect(
+            client, [self._pluggy_acct("conta", "BANK", marketing_name="Nubank Conta")]
+        )
+
+        assert r.json()["name"] == "Nubank Conta"
+
+    def test_lists_all_accounts_of_the_item(self, client):
+        """Um item do MeuPluggy agrega instituições diferentes — o rótulo lista todas."""
+        r = self._connect(
+            client,
+            [
+                self._pluggy_acct("CARTAO LOJA GOLD", "CREDIT"),
+                self._pluggy_acct("banco-x", "BANK"),
+                self._pluggy_acct("Cartão Múltiplo Platinum", "CREDIT"),
+            ],
+        )
+
+        # BANK primeiro, mesmo tendo vindo no meio da lista da API.
+        assert r.json()["name"] == "banco-x, CARTAO LOJA GOLD, Cartão Múltiplo Platinum"
+        assert r.json()["bank_name"] == "banco-x"
+
+    def test_long_label_list_is_truncated_with_count(self, client):
+        accounts = [self._pluggy_acct(f"Cartão de crédito muito longo numero {i}") for i in range(6)]
+
+        r = self._connect(client, accounts)
+
+        name = r.json()["name"]
+        assert len(name) <= 100
+        assert name.endswith("(+5)")
+
+    def test_deduplicates_repeated_labels(self, client):
+        r = self._connect(
+            client, [self._pluggy_acct("banco-x", "BANK"), self._pluggy_acct("banco-x", "BANK")]
+        )
+
+        assert r.json()["name"] == "banco-x"
+
+    def test_explicit_name_wins_over_derivation(self, client):
+        item_id = str(uuid4())
+
+        with (
+            patch("app.services.bank_sync_service.get_api_client", return_value=self._ctx()),
+            patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
+        ):
+            r = client.post(
+                "/bank-accounts",
+                json={"name": "Meu apelido", "bank_name": "Meu banco", "external_id": item_id},
+            )
+
+        assert r.json()["name"] == "Meu apelido"
+        mock_sdk.AccountApi.return_value.accounts_list.assert_not_called()
+
+    def test_pluggy_failure_falls_back_instead_of_erroring(self, client):
+        """Conectar não pode falhar só porque não deu pra derivar o nome."""
+        item_id = str(uuid4())
+
+        with (
+            patch("app.services.bank_sync_service.get_api_client", return_value=self._ctx()),
+            patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
+        ):
+            mock_sdk.AccountApi.return_value.accounts_list.side_effect = RuntimeError("boom")
+            r = client.post("/bank-accounts", json={"external_id": item_id})
+
+        assert r.status_code == 201
+        assert r.json()["name"] == "Conta bancária"
+
+    def test_no_external_id_uses_fallback_without_calling_pluggy(self, client):
+        with patch("app.services.bank_sync_service.get_api_client") as mock_client:
+            r = client.post("/bank-accounts", json={})
+
+        assert r.status_code == 201
+        assert r.json()["name"] == "Conta bancária"
+        assert r.json()["bank_name"] == "Desconhecido"
+        mock_client.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # connect-token

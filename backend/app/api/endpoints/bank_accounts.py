@@ -11,7 +11,7 @@ from app.core.users import current_active_user
 from app.db.database import get_db
 from app.models.bank_account import BankAccountSyncStatus
 from app.models.user import User
-from app.schemas.bank_account import BankAccountCreate, BankAccountResponse
+from app.schemas.bank_account import BankAccountCreate, BankAccountResponse, BankAccountUpdate
 from app.schemas.reconciliation import ReconciliationSuggestionResponse
 from app.services import bank_sync_service
 from app.services.reconciliation_service import suggest_pending
@@ -62,6 +62,19 @@ def create_bank_account(
     user: User = Depends(current_active_user),
 ):
     return bank_sync_service.create_account(db, user.id, payload)
+
+
+@router.patch("/{account_id}", response_model=BankAccountResponse)
+def update_bank_account(
+    account_id: UUID,
+    payload: BankAccountUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user),
+):
+    account = bank_sync_service.get_account(db, user.id, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    return bank_sync_service.update_account(db, account, payload)
 
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)

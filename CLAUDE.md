@@ -80,7 +80,29 @@ Camadas FastAPI seguindo o padrão: **Router → Service → SQLAlchemy ORM → 
 - `app/services/pluggy_client.py` — autentica com `PLUGGY_CLIENT_ID`/`SECRET` (credenciais da aplicação, cache de api_key em memória). O isolamento por usuário vem de `bank_accounts.user_id`, não de um campo da Pluggy (o SDK instalado não expõe `clientUserId` no `ConnectTokenRequest`).
 - `app/services/bank_sync_service.sync_account` — sincroniza transações (dedup por `(user_id, source="pluggy:{tx_id}")`) e, para contas `type == "CREDIT"`, também as faturas via `bill_service`. Usa `*_without_preload_content` + `json.loads` como workaround de um bug de validação Pydantic do SDK (`CreditCardMetadata.payeeMCC`); o mesmo padrão foi replicado para `BillApi.bills_list_without_preload_content`. Ao final, roda `suggest_reconciliation` + `auto_reconcile_confident_matches` sobre as transações recém-importadas.
 - `app/services/bill_service.py` — upsert de `CreditCardBill` por `(user_id, external_id)` e geração/atualização automática do `Payable` correspondente (nunca atualiza um payable já `PAID`).
-- Faturas só existem em conexões Open Finance Regulado — falha ao buscar degrada silenciosamente (lista vazia), não derruba o sync de transações.
+- Faturas só existem em conexões Open Finance Regulado — falha ao buscar degrada para lista vazia (não derruba o sync de transações), mas **loga em stderr** (`[bank_sync] bills indisponíveis ...`). Se a geração automática de `Payable` de fatura parar de acontecer, esse log é o primeiro lugar a olhar.
+- `app/api/endpoints/webhooks.py` — `POST /webhooks/pluggy` (público, sem auth) dispara `run_sync_job` em background para o item afetado nos eventos `item/created|updated` e `transactions/created|updated`. A URL é registrada no dashboard da Pluggy, não via código (`get_connect_token` não passa `ItemOptions.webhook_url`).
+
+#### Uso pessoal via conector "MeuPluggy" (sem plano comercial)
+
+A Pluggy **não atende caso de uso pessoal** no plano comercial (o plano inicial é R$ 2.500/mês, até 500 conexões). Para uso pessoal, a própria Pluggy oferece o **MeuPluggy** (https://meu.pluggy.ai, repo de docs em https://github.com/pluggyai/meu-pluggy): você conecta seus bancos lá e a aplicação de desenvolvimento acessa esses dados via um conector proxy, de graça.
+
+Setup (todo no dashboard/navegador, **não** em código):
+
+1. Conectar os bancos em https://meu.pluggy.ai.
+2. Em https://dashboard.pluggy.ai, criar uma **Development Application** → gera o `PLUGGY_CLIENT_ID`/`PLUGGY_CLIENT_SECRET`.
+3. Em Customização, habilitar o conector **MeuPluggy** (id `200`, `type=PERSONAL_BANK`, `oauth=True`).
+4. Registrar a webhook URL apontando para `<backend>/webhooks/pluggy`.
+5. No LifeOS, Contas Bancárias → Conectar → autorizar via OAuth — **uma vez por banco** conectado no MeuPluggy (banco, não conta).
+
+Fatos verificados empiricamente contra a API (2026-07-29, item real do dono):
+
+- **O trial expirado do dashboard não bloqueia a API** — `AuthApi.auth_create` segue devolvendo api_key e as leituras funcionam, como o README do meu-pluggy promete.
+- **As faturas de cartão funcionam pelo proxy do MeuPluggy** — `BillApi` devolveu 15 e 14 faturas reais (com `dueDate`/`totalAmount`) para os dois cartões do item. A automação de `Payable` de fatura não é bloqueada pelo uso pessoal.
+- Com só o MeuPluggy habilitado, **todo item volta com `connector.name == "MeuPluggy"`** — inútil como rótulo. Daí `describe_item`.
+- **Um item do MeuPluggy agrega várias accounts, possivelmente de instituições diferentes** (uma conta corrente + cartões de bandeiras/emissores distintos vieram no mesmo item). Nomear o item com uma account só seria enganoso — `describe_item` lista todas (BANK primeiro), truncando com `(+N)` acima de 100 chars.
+- **É um item por banco conectado no MeuPluggy**, não um item para tudo: o README do meu-pluggy é explícito ("once per connected bank... bank, not bank account"). Quem tem 3 bancos lá precisa rodar o Conectar 3 vezes no LifeOS, gerando 3 `BankAccount` — daí a importância de `describe_item`/rename.
+- `marketingName` vem **sempre `None`** no proxy; o nome útil está em `name`.
 
 ### Frontend (`frontend/src/`)
 
@@ -95,7 +117,7 @@ SPA roteada com **react-router** (`BrowserRouter`).
 - `pages/PayablesPage.jsx` — lista de contas com filtros, exclusão otimista com undo via toast; embute `RecurringPayablesPage` como aba "Recorrentes".
 - `pages/RecurringPayablesPage.jsx` — CRUD de recorrentes + botão "Gerar para este mês" + bloco de sugestões de recorrentes detectadas automaticamente (`GET /recurring-payables/suggestions`), com aceitar/descartar (descarte é só local, não persiste).
 - `pages/UploadPage.jsx` — upload de extrato CSV + UI de revisão de sugestões de conciliação (as de confidence 1.0 já vêm auto-confirmadas pelo backend e não aparecem aqui).
-- `pages/BankAccountsPage.jsx` — fluxo Pluggy Connect (widget via CDN) + lista de contas conectadas + bloco de faturas de cartão.
+- `pages/BankAccountsPage.jsx` — fluxo Pluggy Connect (widget via CDN) + lista de contas conectadas + sugestões de conciliação (as faturas de cartão são listadas no `DashboardPage`, não aqui). Ao conectar, envia só `external_id` (o backend deriva o nome); clicar no nome da conta habilita rename inline (`PATCH`, otimista).
 - `pages/SettingsPage.jsx` — abas Regras / Categorias / **Notificações** (toggle que assina push via `Notification.requestPermission()` + `pushManager.subscribe()`, usando a chave de `GET /push-subscriptions/vapid-public-key`).
 - `components/FabModal.jsx` — FAB que abre modal para criar payable ou transação.
 - `components/Sidebar.jsx` — nav via `NavLink`; rodapé com e-mail do usuário e logout.
@@ -131,7 +153,7 @@ SPA roteada com **react-router** (`BrowserRouter`).
 
 **`auto_reconcile_confident_matches` (reconciliation_service):** confirma automaticamente sugestões com confidence 1.0 **somente quando o match é único** (nem o payable nem a transação aparecem em mais de uma sugestão exata) — evita reconciliar errado em caso de empate. Rodado ao fim do sync Pluggy e do upload de CSV.
 
-**`upsert_bill` (bill_service):** upsert de `CreditCardBill` por `(user_id, external_id)`; gera um `Payable` na primeira sincronização e atualiza valor/vencimento nas seguintes **só se o payable ainda estiver PENDING** (nunca sobrescreve um já pago).
+**`upsert_bill` (bill_service):** upsert de `CreditCardBill` por `(user_id, external_id)`; gera um `Payable` na primeira sincronização e atualiza valor/vencimento nas seguintes **só se o payable ainda estiver PENDING** (nunca sobrescreve valor/vencimento de um já pago). O **título** é exceção: é recalculado sempre, inclusive em payable pago, porque é só rótulo — payables criados antes de `card_name` ser gravado ficaram como `Fatura {nome da conexão}` e, com o MeuPluggy, dois cartões do mesmo mês viravam títulos idênticos.
 
 **`detect_recurring_candidates` (recurring_detection_service):** agrupa transações EXPENSE por descrição normalizada (maiúsculas, sem dígitos); exige ≥3 meses distintos, valor dentro de ±10% da mediana e dia do mês com desvio ≤3 do modo. Exclui títulos que já têm `RecurringPayable` cadastrado.
 
@@ -160,8 +182,10 @@ SPA roteada com **react-router** (`BrowserRouter`).
 | `GET/POST/DELETE` | `/category-rules` | CRUD de regras de categorização |
 | `GET` | `/summary?month=&year=` | Totais + by_category + budget_used_pct (income/expenses/balance mantidos por compatibilidade, não usados no dashboard) |
 | `GET/POST/DELETE` | `/budgets?month=&year=` | CRUD de orçamentos |
-| `GET/POST/DELETE` | `/bank-accounts` | CRUD de contas bancárias conectadas via Pluggy |
+| `GET/POST/DELETE` | `/bank-accounts` | CRUD de contas bancárias conectadas via Pluggy. No POST, `name`/`bank_name` são opcionais — omitidos, o backend deriva via `describe_item` |
+| `PATCH` | `/bank-accounts/{id}` | Renomeia a conta (`name`/`bank_name`) |
 | `POST` | `/bank-accounts/connect-token` | Token do widget Pluggy Connect |
+| `POST` | `/webhooks/pluggy` | Webhook da Pluggy (público) — dispara sync do item afetado |
 | `POST` | `/bank-accounts/{id}/sync` | Sync de transações + faturas + auto-reconciliação |
 | `GET` | `/credit-card-bills?month=&year=` | Lista faturas de cartão sincronizadas |
 | `POST` | `/push-subscriptions` | Salva subscription VAPID |

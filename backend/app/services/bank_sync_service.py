@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date as date_type
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.models.bank_account import BankAccount, BankAccountSyncStatus
 from app.models.transaction import Transaction, TransactionType
-from app.schemas.bank_account import BankAccountCreate
+from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate
 from app.services import bill_service
 from app.services.category_rule_service import build_keyword_map
 from app.services.pluggy_client import get_api_client
@@ -23,6 +24,10 @@ from app.services.reconciliation_service import (
     drop_resolved_payables,
     suggest_reconciliation,
 )
+
+
+def _log(message: str) -> None:
+    print(f"[bank_sync] {message}", file=sys.stderr)
 
 
 def list_accounts(db: Session, user_id: UUID) -> List[BankAccount]:
@@ -39,8 +44,73 @@ def get_account(db: Session, user_id: UUID, account_id: UUID) -> Optional[BankAc
     ).scalar_one_or_none()
 
 
+def describe_item(item_id: UUID) -> tuple[str, str]:
+    """Deriva `(name, bank_name)` legíveis para um item recém-conectado da Pluggy.
+
+    No uso pessoal o único conector habilitado é o MeuPluggy, então
+    `connector.name` é literalmente "MeuPluggy" em toda conexão — usá-lo como
+    rótulo não diz nada. Os nomes úteis estão nas accounts do item (`name`;
+    `marketingName` vem `None` no proxy do MeuPluggy).
+
+    Um item do MeuPluggy agrega accounts de **instituições diferentes** (ex:
+    corrente do Itaú + cartão Magalu + cartão Itaú), então o rótulo lista as
+    accounts em vez de eleger uma: nomear a conexão inteira com o primeiro
+    cartão da lista seria enganoso, e a ordem que a API devolve é arbitrária.
+    """
+    with get_api_client() as ac:
+        pluggy_accounts = pluggy_sdk.AccountApi(ac).accounts_list(item_id=item_id).results or []
+
+    # Contas BANK primeiro — a conta corrente é o rótulo menos surpreendente
+    # para encabeçar a conexão.
+    ordered = sorted(pluggy_accounts, key=lambda a: 0 if getattr(a, "type", None) == "BANK" else 1)
+
+    labels: List[str] = []
+    for pluggy_acct in ordered:
+        label = (
+            getattr(pluggy_acct, "marketing_name", None)
+            or getattr(pluggy_acct, "name", None)
+            or ""
+        ).strip()
+        if label and label not in labels:
+            labels.append(label)
+
+    if not labels:
+        return "Conta bancária", "Desconhecido"
+
+    name = ", ".join(labels)
+    if len(name) > 100:
+        name = f"{labels[0][:80]} (+{len(labels) - 1})"
+    return name, labels[0][:100]
+
+
 def create_account(db: Session, user_id: UUID, payload: BankAccountCreate) -> BankAccount:
-    account = BankAccount(user_id=user_id, **payload.model_dump())
+    data = payload.model_dump()
+
+    if (not data.get("name") or not data.get("bank_name")) and data.get("external_id"):
+        try:
+            derived_name, derived_bank = describe_item(UUID(data["external_id"]))
+        except Exception as exc:  # noqa: BLE001
+            # Nome ruim é bem melhor que falhar a conexão — o usuário pode
+            # renomear depois via PATCH.
+            _log(f"não foi possível derivar o nome do item {data['external_id']}: {type(exc).__name__}: {exc}")
+            derived_name, derived_bank = "Conta bancária", "Desconhecido"
+        data["name"] = data.get("name") or derived_name
+        data["bank_name"] = data.get("bank_name") or derived_bank
+
+    data["name"] = data.get("name") or "Conta bancária"
+    data["bank_name"] = data.get("bank_name") or "Desconhecido"
+
+    account = BankAccount(user_id=user_id, **data)
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+def update_account(db: Session, account: BankAccount, payload: BankAccountUpdate) -> BankAccount:
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(account, field, value)
     db.add(account)
     db.commit()
     db.refresh(account)
@@ -92,9 +162,16 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         account_id=pluggy_acct.id
                     )
                     bills_data = json.loads(raw_bills.data).get("results") or []
-                except Exception:
+                except Exception as exc:  # noqa: BLE001
                     # Bills só existem em conexões Open Finance Regulado — degrada
-                    # silenciosamente quando a conexão não as suporta.
+                    # para lista vazia quando a conexão não as suporta, mas loga:
+                    # sem isso não há como distinguir "conector não expõe faturas"
+                    # de um bug nosso, e a geração automática de Payable de fatura
+                    # some sem aviso.
+                    _log(
+                        f"bills indisponíveis (account={pluggy_acct.id} card={card_name!r}): "
+                        f"{type(exc).__name__}: {exc}"
+                    )
                     bills_data = []
 
                 for bill_data in bills_data:

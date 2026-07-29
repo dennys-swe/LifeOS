@@ -48,6 +48,8 @@ export default function BankAccountsPage() {
   const [message, setMessage] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [confirming, setConfirming] = useState(new Set());
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
   const pluggyRef = useRef(null);
   const prevStatusRef = useRef({});
 
@@ -111,9 +113,10 @@ export default function BankAccountsPage() {
         connectToken: data.access_token,
         onSuccess: async ({ item }) => {
           try {
+            // Sem nome: o backend deriva das accounts da Pluggy. Com o conector
+            // MeuPluggy, item.connector.name é sempre "MeuPluggy" — usá-lo aqui
+            // deixaria todos os bancos conectados com o mesmo rótulo.
             await api.post("/bank-accounts", {
-              name: item.connector?.name ?? "Conta bancária",
-              bank_name: item.connector?.name ?? "Desconhecido",
               account_type: "checking",
               external_id: item.id,
             });
@@ -153,6 +156,25 @@ export default function BankAccountsPage() {
     if (!confirm(`Remover "${account.name}"?`)) return;
     await api.delete(`/bank-accounts/${account.id}`);
     fetchAccounts();
+  }
+
+  function startRename(account) {
+    setRenamingId(account.id);
+    setRenameValue(account.name);
+  }
+
+  async function handleRename(account) {
+    const name = renameValue.trim();
+    setRenamingId(null);
+    if (!name || name === account.name) return;
+
+    setAccounts((prev) => prev.map((a) => (a.id === account.id ? { ...a, name } : a)));
+    try {
+      await api.patch(`/bank-accounts/${account.id}`, { name });
+    } catch {
+      setMessage({ type: "err", text: "Não foi possível renomear a conta." });
+      fetchAccounts();
+    }
   }
 
   async function handleConfirmSuggestion(suggestion) {
@@ -272,7 +294,29 @@ export default function BankAccountsPage() {
                 className="flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900"
               >
                 <div>
-                  <p className="font-medium text-gray-900 dark:text-slate-100">{acct.name}</p>
+                  {renamingId === acct.id ? (
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => handleRename(acct)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleRename(acct);
+                        if (e.key === "Escape") setRenamingId(null);
+                      }}
+                      maxLength={100}
+                      className="w-full rounded-lg border border-gray-300 px-2 py-1 font-medium text-gray-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => startRename(acct)}
+                      title="Clique para renomear"
+                      className="font-medium text-gray-900 hover:underline dark:text-slate-100"
+                    >
+                      {acct.name}
+                    </button>
+                  )}
                   <p className="text-sm text-gray-500 dark:text-slate-400">{acct.bank_name}</p>
                   {acct.last_sync_at && (
                     <p className="mt-1 text-xs text-gray-400 dark:text-slate-600">

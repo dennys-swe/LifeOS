@@ -127,8 +127,16 @@ def _sync_payable(db: Session, bill: CreditCardBill, account: BankAccount) -> No
         return
 
     payable = db.get(Payable, bill.payable_id)
-    if payable is not None and payable.status == PayableStatus.PENDING:
-        payable.title = title
+    if payable is None:
+        return
+
+    # O título é só rótulo, então é corrigido mesmo em fatura já paga: payables
+    # criados antes de `card_name` existir ficaram todos como "Fatura {nome da
+    # conexão}", e com o conector MeuPluggy isso deixa dois cartões do mesmo mês
+    # com título idêntico e indistinguível. Valor e vencimento, não — são fatos
+    # de uma fatura já liquidada e não devem ser reescritos.
+    payable.title = title
+    if payable.status == PayableStatus.PENDING:
         payable.amount = bill.total_amount
         payable.due_date = bill.due_date
-        db.add(payable)
+    db.add(payable)

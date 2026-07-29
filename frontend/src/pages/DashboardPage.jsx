@@ -330,9 +330,16 @@ export default function DashboardPage({ month, year, onMonthChange }) {
             <div className="flex flex-col gap-3">
               {bills.map((bill) => (
                 <div key={bill.id} className="flex items-center justify-between gap-2">
-                  <p className="text-sm text-gray-700 dark:text-slate-300">
-                    Vence em {new Date(`${bill.due_date}T00:00:00`).toLocaleDateString("pt-BR")}
-                  </p>
+                  <div className="min-w-0">
+                    {bill.card_name && (
+                      <p className="truncate text-sm font-medium text-gray-900 dark:text-slate-100">
+                        {bill.card_name}
+                      </p>
+                    )}
+                    <p className="text-sm text-gray-700 dark:text-slate-300">
+                      Vence em {new Date(`${bill.due_date}T00:00:00`).toLocaleDateString("pt-BR")}
+                    </p>
+                  </div>
                   <span className="text-sm font-semibold text-gray-900 dark:text-slate-100">
                     {fmt(bill.total_amount)}
                   </span>

@@ -130,6 +130,44 @@ def test_upsert_bill_does_not_update_paid_payable(db_session, user):
     assert payable.amount == Decimal("850.00")
 
 
+def test_upsert_bill_fixes_title_of_paid_payable(db_session, user):
+    """O título é rótulo, não fato financeiro — payables antigos ficaram com o nome
+    da conexão ("Fatura MeuPluggy") e precisam ser corrigidos mesmo já pagos."""
+    acc = _make_account(db_session, user)
+    bill = bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload())
+    payable = db_session.get(Payable, bill.payable_id)
+    payable.status = PayableStatus.PAID
+    db_session.add(payable)
+    db_session.commit()
+    amount_before, due_before = payable.amount, payable.due_date
+
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload(), card_name="Cartão Platinum"
+    )
+
+    db_session.refresh(payable)
+    assert payable.title.startswith("Fatura Cartão Platinum —")
+    # valor e vencimento seguem congelados
+    assert payable.amount == amount_before
+    assert payable.due_date == due_before
+
+
+def test_two_cards_same_month_get_distinct_titles(db_session, user):
+    acc = _make_account(db_session, user)
+
+    bill_a = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload("bill-a"), card_name="Cartão Loja"
+    )
+    bill_b = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-2", _bill_payload("bill-b"), card_name="Cartão Platinum"
+    )
+
+    title_a = db_session.get(Payable, bill_a.payable_id).title
+    title_b = db_session.get(Payable, bill_b.payable_id).title
+    assert title_a != title_b
+    assert "Cartão Loja" in title_a and "Cartão Platinum" in title_b
+
+
 def test_list_bills_filters_by_month_and_user(db_session, user, other_user):
     acc = _make_account(db_session, user)
     other_acc = _make_account(db_session, other_user)
