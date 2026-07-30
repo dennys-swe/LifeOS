@@ -36,13 +36,19 @@ export function AuthProvider({ children }) {
     return login(email, password);
   }
 
+  async function updateProfile(data) {
+    const res = await api.patch("/users/me", data);
+    setUser(res.data);
+    return res.data;
+  }
+
   function logout() {
     clearToken();
     setUser(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, updateProfile, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -2,17 +2,43 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-display: 'Outfit', system-ui, sans-serif;
+}
+
 :root {
-  font-family: "Space Grotesk", system-ui, sans-serif;
-  color: #0f172a;
-  background-color: #f8fafc;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
 }
 
-body {
-  margin: 0;
-  min-height: 100vh;
+.font-display {
+  font-family: 'Outfit', system-ui, sans-serif;
 }
 
-#root {
-  min-height: 100vh;
+.glass-panel {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.dark .glass-panel {
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.3);
+  border-radius: 9999px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(51, 65, 85, 0.5);
 }

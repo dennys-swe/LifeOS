@@ -1,9 +1,5 @@
-import { useEffect, useState } from "react";
 import { NavLink } from "react-router";
-import api from "../services/api";
 import { useFinance } from "../context/FinanceContext";
-
-// ─── Icons ────────────────────────────────────────────────────────────────────
 
 function IconHome({ className }) {
   return (
@@ -47,71 +43,58 @@ function IconSettings({ className }) {
 }
 
 const NAV_ITEMS = [
-  { to: "/", end: true, label: "Dashboard", Icon: IconHome },
+  { to: "/", end: true, label: "Início", Icon: IconHome },
   { to: "/payables", label: "Contas", Icon: IconList, showBadge: true },
   { to: "/transactions", label: "Extrato", Icon: IconArrows },
-  { to: "/banks", label: "Contas Bancárias", Icon: IconBank },
-  { to: "/settings", label: "Configurações", Icon: IconSettings },
+  { to: "/banks", label: "Bancos", Icon: IconBank },
+  { to: "/settings", label: "Ajustes", Icon: IconSettings },
 ];
 
-export default function Sidebar() {
-  const { refresh } = useFinance() ?? {};
-  const [upcomingCount, setUpcomingCount] = useState(0);
+export default function BottomNav() {
+  const { payables } = useFinance() ?? {};
 
-  useEffect(() => {
-    api
-      .get("/payables/upcoming?days=7")
-      .then((res) => setUpcomingCount(res.data?.length ?? 0))
-      .catch(() => setUpcomingCount(0));
-  }, [refresh]);
+  const upcomingCount = (payables ?? []).filter((p) => {
+    if (p.status !== "PENDING" || !p.due_date) return false;
+    const today = new Date().toISOString().slice(0, 10);
+    return p.due_date <= today;
+  }).length;
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-800/80 bg-gradient-to-b from-slate-950 via-emerald-950 to-slate-950 text-white shadow-2xl backdrop-blur-xl md:flex">
-      {/* Brand Header */}
-      <div className="flex h-20 items-center gap-3.5 border-b border-emerald-900/40 px-6">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 shadow-lg shadow-emerald-500/30">
-          <span className="font-display text-sm font-extrabold text-slate-950 tracking-wider">LO</span>
-        </div>
-        <div>
-          <h1 className="font-display text-base font-bold text-white tracking-tight">LifeOS</h1>
-          <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Inteligência Financeira</p>
-        </div>
-      </div>
-
-      {/* Nav List */}
-      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-6">
-        {NAV_ITEMS.map((item) => {
-          const badge = item.showBadge && upcomingCount > 0;
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                `group relative flex items-center gap-3.5 rounded-2xl px-4 py-3 text-xs font-semibold transition-all duration-200 ${
-                  isActive
-                    ? "bg-emerald-500 text-slate-950 font-bold shadow-lg shadow-emerald-500/25"
-                    : "text-slate-300 hover:bg-white/10 hover:text-white"
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <item.Icon className={`h-5 w-5 transition-transform duration-200 group-hover:scale-110 ${isActive ? "text-slate-950" : "text-slate-400 group-hover:text-white"}`} />
-                  <span>{item.label}</span>
-                  {badge && (
-                    <span className={`ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-extrabold shadow-sm animate-pulse ${
-                      isActive ? "bg-slate-950 text-white" : "bg-rose-500 text-white"
-                    }`}>
+    <nav className="fixed bottom-3 inset-x-3 z-40 flex items-center justify-around rounded-2xl border border-slate-200/80 bg-white/90 p-1.5 shadow-xl backdrop-blur-lg dark:border-slate-800/80 dark:bg-slate-900/90 md:hidden">
+      {NAV_ITEMS.map((item) => {
+        const hasBadge = item.showBadge && upcomingCount > 0;
+        return (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            className={({ isActive }) =>
+              `relative flex flex-1 flex-col items-center justify-center py-1.5 transition-all duration-200 ${
+                isActive
+                  ? "font-medium text-emerald-600 dark:text-emerald-400"
+                  : "text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+              }`
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <div className="relative">
+                  <item.Icon className="h-5 w-5" />
+                  {hasBadge && (
+                    <span className="absolute -right-1.5 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white shadow-sm">
                       {upcomingCount > 9 ? "9+" : upcomingCount}
                     </span>
                   )}
-                </>
-              )}
-            </NavLink>
-          );
-        })}
-      </nav>
-    </aside>
+                </div>
+                <span className="mt-0.5 text-[10px] tracking-tight">{item.label}</span>
+                {isActive && (
+                  <span className="absolute -bottom-1 h-1 w-4 rounded-full bg-emerald-500" />
+                )}
+              </>
+            )}
+          </NavLink>
+        );
+      })}
+    </nav>
   );
 }

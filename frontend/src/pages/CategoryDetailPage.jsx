@@ -13,9 +13,6 @@ import api from "../services/api";
 
 const UNCATEGORIZED_COLOR = "#64748B";
 
-/** "Pra onde vai" no nível mais concreto: as transações de uma categoria num
- * mês, ordenadas por data. Chegou aqui a partir de um clique no dashboard
- * (barra de categoria ou card de insight). */
 export default function CategoryDetailPage() {
   const { id } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -25,10 +22,6 @@ export default function CategoryDetailPage() {
   const month = Number(searchParams.get("month")) || new Date().getMonth() + 1;
   const year = Number(searchParams.get("year")) || new Date().getFullYear();
 
-  // `key` identifica a combinação categoria+mês do resultado guardado — não é
-  // resetado sincronamente no efeito (o lint desaprova setState fora de um
-  // callback assíncrono), então "carregando" é "o resultado guardado ainda não
-  // é desta combinação", não uma flag reiniciada à parte.
   const requestKey = `${id}:${month}:${year}`;
   const [result, setResult] = useState(null);
 
@@ -36,8 +29,8 @@ export default function CategoryDetailPage() {
     const params = {
       month,
       year,
-      type: "EXPENSE", // + include_transfers=false = mesma definição de "gasto"
-      include_transfers: false, // que o backend usa em CategorySummary.total_expenses
+      type: "EXPENSE",
+      include_transfers: false,
       limit: 500,
     };
     if (isUncategorized) {
@@ -71,55 +64,55 @@ export default function CategoryDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-8">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6 md:px-8 md:py-8">
         <div>
           <Link
             to="/"
-            className="text-xs font-medium uppercase tracking-widest text-gray-400 hover:text-gray-600 dark:text-slate-500 dark:hover:text-slate-300"
+            className="font-display text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-emerald-500 transition-colors dark:text-slate-500"
           >
-            ← Dashboard
+            ← Voltar ao Dashboard
           </Link>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <CategoryDot color={color} className="h-3.5 w-3.5" />
-              <h1 className="text-2xl font-semibold text-gray-900 dark:text-slate-100">{name}</h1>
+            <div className="flex items-center gap-3">
+              <CategoryDot color={color} className="h-4 w-4" />
+              <h1 className="font-display text-2xl md:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">{name}</h1>
             </div>
             <MonthNavigator month={month} year={year} onChange={handleMonthChange} />
           </div>
         </div>
 
         <Card className="p-6">
-          <p className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-slate-500">
-            Total no mês
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            Total Gasto no Mês
           </p>
-          <p className="mt-2 text-3xl font-semibold text-gray-900 dark:text-slate-100">
+          <p className="mt-2 font-display text-3xl font-extrabold text-slate-900 dark:text-white">
             {transactions === null ? <Skeleton className="h-9 w-40" /> : fmt(total)}
           </p>
         </Card>
 
-        <Card className="p-2">
+        <Card className="p-4">
           {transactions === null ? (
-            <div className="flex flex-col gap-2 p-4">
+            <div className="flex flex-col gap-2 p-2">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12" />
               ))}
             </div>
           ) : error ? (
-            <EmptyState>Não foi possível carregar as transações.</EmptyState>
+            <EmptyState className="py-8">Não foi possível carregar as transações.</EmptyState>
           ) : transactions.length === 0 ? (
-            <EmptyState>Nenhuma transação nesta categoria no mês.</EmptyState>
+            <EmptyState className="py-8">Nenhuma transação nesta categoria no mês.</EmptyState>
           ) : (
-            <div className="divide-y divide-gray-50 dark:divide-slate-800/60">
+            <div className="flex flex-col gap-2">
               {transactions.map((t) => (
-                <div key={t.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div key={t.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/50 p-3.5 dark:border-slate-800/40 dark:bg-slate-900/40">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-gray-800 dark:text-slate-200">
+                    <p className="truncate text-sm font-bold text-slate-900 dark:text-white">
                       {t.description}
                     </p>
-                    <p className="text-xs text-gray-400 dark:text-slate-500">{fmtDate(t.date)}</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">{fmtDate(t.date)}</p>
                   </div>
-                  <span className="flex-shrink-0 text-sm font-semibold text-gray-900 dark:text-slate-100">
+                  <span className="font-display text-sm font-bold text-slate-900 dark:text-white">
                     {fmt(t.amount)}
                   </span>
                 </div>

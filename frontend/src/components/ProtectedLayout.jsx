@@ -4,6 +4,8 @@ import { Navigate, Outlet } from "react-router";
 import { useAuth } from "../context/AuthContext";
 import { FinanceProvider } from "../context/FinanceContext";
 import Sidebar from "./Sidebar";
+import BottomNav from "./BottomNav";
+import Header from "./Header";
 import FabModal from "./FabModal";
 
 export default function ProtectedLayout() {
@@ -19,8 +21,13 @@ export default function ProtectedLayout() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-slate-950">
-        <p className="text-sm text-gray-400 dark:text-slate-500">Carregando...</p>
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
+          <p className="font-display text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+            LifeOS · Carregando...
+          </p>
+        </div>
       </div>
     );
   }
@@ -30,21 +37,25 @@ export default function ProtectedLayout() {
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-50 dark:bg-slate-950">
+    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900 antialiased selection:bg-emerald-500 selection:text-white dark:bg-slate-950 dark:text-slate-100">
       <FinanceProvider month={selectedMonth} year={selectedYear}>
         <Sidebar />
+        <BottomNav />
 
-        <main className="flex-1 overflow-x-hidden pt-14 pb-16 md:py-0 md:ml-60">
-          <Outlet
-            context={{
-              month: selectedMonth,
-              year: selectedYear,
-              onMonthChange: handleMonthChange,
-              payablesFilter,
-              onPayablesFilterChange: setPayablesFilter,
-            }}
-          />
-        </main>
+        <div className="flex flex-1 flex-col overflow-x-hidden md:ml-64">
+          <Header />
+          <main className="flex-1 pb-20 md:pb-8">
+            <Outlet
+              context={{
+                month: selectedMonth,
+                year: selectedYear,
+                onMonthChange: handleMonthChange,
+                payablesFilter,
+                onPayablesFilterChange: setPayablesFilter,
+              }}
+            />
+          </main>
+        </div>
 
         <FabModal />
       </FinanceProvider>
