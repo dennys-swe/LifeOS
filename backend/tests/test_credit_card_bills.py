@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from calendar import monthrange
+from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -27,7 +28,25 @@ def _make_account(db, user) -> BankAccount:
     return acc
 
 
-def _bill_payload(bill_id="bill-1", due_date="2026-08-10T00:00:00Z", total_amount=850.0):
+def _in_window(day: int = 10, *, months_ahead: int = 0) -> date:
+    """Data dentro da janela que gera Payable (mês atual ou o seguinte).
+
+    Relativa a hoje de propósito: a janela é calculada a partir de `date.today()`,
+    então data fixa faria o teste passar ou falhar dependendo do calendário.
+    """
+    today = date.today()
+    year, month = today.year, today.month + months_ahead
+    if month > 12:
+        year, month = year + 1, month - 12
+    return date(year, month, min(day, monthrange(year, month)[1]))
+
+
+def _iso(d: date) -> str:
+    return f"{d.isoformat()}T00:00:00Z"
+
+
+def _bill_payload(bill_id="bill-1", due_date=None, total_amount=850.0):
+    due_date = due_date or _iso(_in_window(10, months_ahead=1))
     return {
         "id": bill_id,
         "dueDate": due_date,
@@ -44,13 +63,13 @@ def test_upsert_bill_creates_payable(db_session, user):
 
     assert bill.external_id == "bill-1"
     assert bill.total_amount == Decimal("850.00")
-    assert bill.due_date == date(2026, 8, 10)
+    assert bill.due_date == _in_window(10, months_ahead=1)
     assert bill.payable_id is not None
 
     payable = db_session.get(Payable, bill.payable_id)
     assert payable is not None
     assert payable.amount == Decimal("850.00")
-    assert payable.due_date == date(2026, 8, 10)
+    assert payable.due_date == bill.due_date
     assert payable.status == PayableStatus.PENDING
     assert "Cartão Nubank" in payable.title
 
@@ -74,11 +93,11 @@ def test_upsert_bill_reuses_existing_bill_when_pluggy_reissues_external_id(db_se
     acc = _make_account(db_session, user)
     first = bill_service.upsert_bill(
         db_session, user.id, acc, "pluggy-acc-1",
-        _bill_payload(bill_id="bill-original", due_date="2026-05-10T00:00:00Z", total_amount=655.34),
+        _bill_payload(bill_id="bill-original", due_date=_iso(_in_window(10)), total_amount=655.34),
     )
     second = bill_service.upsert_bill(
         db_session, user.id, acc, "pluggy-acc-1",
-        _bill_payload(bill_id="bill-reissued", due_date="2026-05-11T00:00:00Z", total_amount=655.34),
+        _bill_payload(bill_id="bill-reissued", due_date=_iso(_in_window(11)), total_amount=655.34),
     )
 
     bills = db_session.query(CreditCardBill).all()
@@ -87,7 +106,7 @@ def test_upsert_bill_reuses_existing_bill_when_pluggy_reissues_external_id(db_se
     assert len(payables) == 1
     assert second.id == first.id
     assert second.external_id == "bill-reissued"
-    assert second.due_date == date(2026, 5, 11)
+    assert second.due_date == _in_window(11)
 
 
 def test_upsert_bill_does_not_merge_bills_from_different_cards(db_session, user):
@@ -166,6 +185,102 @@ def test_two_cards_same_month_get_distinct_titles(db_session, user):
     title_b = db_session.get(Payable, bill_b.payable_id).title
     assert title_a != title_b
     assert "Cartão Loja" in title_a and "Cartão Platinum" in title_b
+
+
+def test_old_bill_is_saved_without_generating_payable(db_session, user):
+    """Histórico antigo não vira conta a pagar: sem isso, fatura antiga que a
+    conciliação não casou fica PENDING pra sempre e aparece como 'vencida'."""
+    acc = _make_account(db_session, user)
+    old = date.today().replace(day=1) - timedelta(days=120)
+
+    bill = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload(due_date=_iso(old))
+    )
+
+    assert bill.id is not None  # a fatura em si continua salva
+    assert bill.payable_id is None
+    assert db_session.query(Payable).count() == 0
+
+
+def test_far_future_projected_bill_does_not_generate_payable(db_session, user):
+    """Alguns bancos devolvem faturas projetadas de parcelamento — um cartão do
+    Inter veio com 48 faturas, a mais distante ~1 ano à frente."""
+    acc = _make_account(db_session, user)
+
+    bill = bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        _bill_payload(due_date=_iso(_in_window(12, months_ahead=6))),
+    )
+
+    assert bill.payable_id is None
+    assert db_session.query(Payable).count() == 0
+
+
+def test_current_and_next_month_bills_generate_payables(db_session, user):
+    acc = _make_account(db_session, user)
+
+    atual = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload("b-atual", _iso(_in_window(10)))
+    )
+    proxima = bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-2",
+        _bill_payload("b-prox", _iso(_in_window(10, months_ahead=1))),
+    )
+
+    assert atual.payable_id is not None
+    assert proxima.payable_id is not None
+
+
+def test_existing_payable_still_syncs_after_bill_leaves_window(db_session, user):
+    """A janela filtra só a criação — payable que já existe segue mantido."""
+    acc = _make_account(db_session, user)
+    bill = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=500.0)
+    )
+    payable_id = bill.payable_id
+    assert payable_id is not None
+
+    # Fatura "envelhece" para fora da janela, mas o payable já existe.
+    bill.due_date = date.today().replace(day=1) - timedelta(days=200)
+    db_session.add(bill)
+    db_session.commit()
+
+    bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        _bill_payload(total_amount=777.0),
+        card_name="Cartão Renomeado",
+    )
+
+    payable = db_session.get(Payable, payable_id)
+    assert payable is not None
+    assert "Cartão Renomeado" in payable.title
+    assert db_session.query(Payable).count() == 1
+
+
+def test_is_in_payable_window_boundaries():
+    today = date(2026, 7, 29)
+
+    assert bill_service.is_in_payable_window(date(2026, 7, 1), today) is True
+    assert bill_service.is_in_payable_window(date(2026, 8, 31), today) is True
+    assert bill_service.is_in_payable_window(date(2026, 6, 30), today) is False
+    assert bill_service.is_in_payable_window(date(2026, 9, 1), today) is False
+
+
+def test_is_in_payable_window_crosses_year():
+    today = date(2026, 12, 15)
+
+    assert bill_service.is_in_payable_window(date(2026, 12, 10), today) is True
+    assert bill_service.is_in_payable_window(date(2027, 1, 31), today) is True
+    assert bill_service.is_in_payable_window(date(2027, 2, 1), today) is False
 
 
 def test_list_bills_filters_by_month_and_user(db_session, user, other_user):

@@ -293,7 +293,7 @@ export default function BankAccountsPage() {
                 key={acct.id}
                 className="flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900"
               >
-                <div>
+                <div className="min-w-0 flex-1">
                   {renamingId === acct.id ? (
                     <input
                       autoFocus
@@ -311,13 +311,13 @@ export default function BankAccountsPage() {
                     <button
                       type="button"
                       onClick={() => startRename(acct)}
-                      title="Clique para renomear"
-                      className="font-medium text-gray-900 hover:underline dark:text-slate-100"
+                      title={`${acct.name} — clique para renomear`}
+                      className="block max-w-full truncate text-left font-medium text-gray-900 hover:underline dark:text-slate-100"
                     >
                       {acct.name}
                     </button>
                   )}
-                  <p className="text-sm text-gray-500 dark:text-slate-400">{acct.bank_name}</p>
+                  <p className="truncate text-sm text-gray-500 dark:text-slate-400">{acct.bank_name}</p>
                   {acct.last_sync_at && (
                     <p className="mt-1 text-xs text-gray-400 dark:text-slate-600">
                       Última sync: {new Date(acct.last_sync_at).toLocaleString("pt-BR")}

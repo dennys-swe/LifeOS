@@ -155,6 +155,8 @@ SPA roteada com **react-router** (`BrowserRouter`).
 
 **`upsert_bill` (bill_service):** upsert de `CreditCardBill` por `(user_id, external_id)`; gera um `Payable` na primeira sincronização e atualiza valor/vencimento nas seguintes **só se o payable ainda estiver PENDING** (nunca sobrescreve valor/vencimento de um já pago). O **título** é exceção: é recalculado sempre, inclusive em payable pago, porque é só rótulo — payables criados antes de `card_name` ser gravado ficaram como `Fatura {nome da conexão}` e, com o MeuPluggy, dois cartões do mesmo mês viravam títulos idênticos.
 
+**`is_in_payable_window` (bill_service):** o `Payable` só é **criado** se o vencimento da fatura cair no mês atual ou no seguinte. Motivo: a Pluggy devolve o histórico inteiro do cartão e, em alguns bancos, também faturas **projetadas** de parcelamento — um cartão do Inter veio com 48 faturas, a mais distante vencendo ~1 ano à frente. Sem a janela, fatura antiga não conciliada fica `PENDING` pra sempre (aparece como "vencida" que não se deve) e projeção futura polui meses à frente com valor que ainda vai mudar. Fora da janela a fatura **continua salva** como `CreditCardBill` — o histórico segue disponível para análise (`detect_recurring_candidates`, comparação de categorias), só não vira obrigação a pagar. A janela filtra apenas a criação: payable que já existe continua sendo mantido em sincronia.
+
 **`detect_recurring_candidates` (recurring_detection_service):** agrupa transações EXPENSE por descrição normalizada (maiúsculas, sem dígitos); exige ≥3 meses distintos, valor dentro de ±10% da mediana e dia do mês com desvio ≤3 do modo. Exclui títulos que já têm `RecurringPayable` cadastrado.
 
 ### Endpoints da API

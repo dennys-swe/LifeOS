@@ -36,6 +36,26 @@ def _first_day_of_next_month(d: date) -> date:
     return date(d.year, d.month + 1, 1)
 
 
+def is_in_payable_window(due_date: date, today: Optional[date] = None) -> bool:
+    """A fatura está na janela acionável (mês atual ou o seguinte)?
+
+    A Pluggy devolve o histórico inteiro do cartão e, em alguns bancos, também
+    faturas **projetadas** de parcelamento — um cartão do Inter veio com 48
+    faturas, a mais distante vencendo quase um ano à frente. Gerar `Payable`
+    para todas polui a lista de contas a pagar em duas pontas: faturas antigas
+    que a conciliação não casou viram "vencida" fantasma, e as projeções futuras
+    mostram valores que ainda vão mudar.
+
+    Fora da janela a fatura continua salva como `CreditCardBill` — o histórico
+    segue disponível para análise, só não vira obrigação a pagar.
+    """
+    today = today or date.today()
+    start = date(today.year, today.month, 1)
+    next_month = _first_day_of_next_month(start)
+    end = date(next_month.year, next_month.month, monthrange(next_month.year, next_month.month)[1])
+    return start <= due_date <= end
+
+
 def upsert_bill(
     db: Session,
     user_id: UUID,
@@ -113,6 +133,11 @@ def _sync_payable(db: Session, bill: CreditCardBill, account: BankAccount) -> No
     title = f"Fatura {label} — {bill.due_date.strftime('%m/%Y')}"
 
     if bill.payable_id is None:
+        # Só a criação é filtrada: um payable que já existe continua sendo
+        # mantido em sincronia mesmo que a fatura tenha saído da janela.
+        if not is_in_payable_window(bill.due_date):
+            return
+
         payable = Payable(
             user_id=bill.user_id,
             title=title,
