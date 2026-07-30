@@ -25,6 +25,7 @@ class CreditCardBill(Base):
     pluggy_account_id: Mapped[str] = mapped_column(String(100), nullable=False)
     external_id: Mapped[str] = mapped_column(String(100), nullable=False)
     card_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    custom_card_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
     total_amount: Mapped[Numeric] = mapped_column(Numeric(12, 2), nullable=False)
     minimum_payment_amount: Mapped[Numeric | None] = mapped_column(Numeric(12, 2), nullable=True)

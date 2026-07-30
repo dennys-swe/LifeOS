@@ -34,7 +34,7 @@ export default function ProtectedLayout() {
       <FinanceProvider month={selectedMonth} year={selectedYear}>
         <Sidebar />
 
-        <main className="flex-1 overflow-x-hidden md:ml-60">
+        <main className="flex-1 overflow-x-hidden pt-14 pb-16 md:py-0 md:ml-60">
           <Outlet
             context={{
               month: selectedMonth,

@@ -318,10 +318,39 @@ export default function PayablesPage({
         ) : (
           <>
             {dueTodayCount > 0 && (
-              <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
-                {dueTodayCount} conta{dueTodayCount > 1 ? "s" : ""} vencendo hoje
-              </p>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                ⚠️ {dueTodayCount} conta{dueTodayCount > 1 ? "s" : ""} vencendo hoje!
+              </div>
             )}
+
+            {/* Summary stats */}
+            <section className="grid gap-4 sm:grid-cols-4">
+              <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs text-gray-500 dark:text-slate-400">Total do mês</p>
+                <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-slate-100">
+                  {fmt(payablesThisMonth.reduce((s, p) => s + Number(p.amount), 0))}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs text-gray-500 dark:text-slate-400">A vencer</p>
+                <p className="mt-1 text-xl font-semibold text-amber-600 dark:text-amber-400">
+                  {fmt(pendingPayables.filter((p) => p.due_date >= todayStr).reduce((s, p) => s + Number(p.amount), 0))}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs text-gray-500 dark:text-slate-400">Atrasadas</p>
+                <p className="mt-1 text-xl font-semibold text-rose-600 dark:text-rose-400">
+                  {fmt(overduePayables.reduce((s, p) => s + Number(p.amount), 0))}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs text-gray-500 dark:text-slate-400">Pagas</p>
+                <p className="mt-1 text-xl font-semibold text-emerald-600 dark:text-emerald-400">
+                  {fmt(paidPayables.reduce((s, p) => s + Number(p.amount), 0))}
+                </p>
+              </div>
+            </section>
+
             <div className="flex flex-wrap gap-2">
               {[
                 { key: FILTERS.all, label: "Todas" },

@@ -335,3 +335,28 @@ def test_sync_account_imports_bills_for_credit_accounts(db_session, user):
     bills = db_session.query(CreditCardBill).all()
     assert len(bills) == 1
     assert bills[0].payable_id is not None
+
+
+def test_update_card_alias_updates_all_bills_and_payables(client, db_session, user):
+    acc = _make_account(db_session, user)
+    bill1 = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-inter", _bill_payload("b1", _iso(_in_window(10)))
+    )
+    bill2 = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-inter", _bill_payload("b2", _iso(_in_window(10, months_ahead=1)))
+    )
+
+    resp = client.patch(f"/credit-card-bills/{bill1.id}", json={"custom_card_name": "Inter Black"})
+    assert resp.status_code == 200
+    assert resp.json()["custom_card_name"] == "Inter Black"
+
+    db_session.refresh(bill1)
+    db_session.refresh(bill2)
+    assert bill1.custom_card_name == "Inter Black"
+    assert bill2.custom_card_name == "Inter Black"
+
+    payable1 = db_session.get(Payable, bill1.payable_id)
+    payable2 = db_session.get(Payable, bill2.payable_id)
+    assert "Fatura Inter Black —" in payable1.title
+    assert "Fatura Inter Black —" in payable2.title
+

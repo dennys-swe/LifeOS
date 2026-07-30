@@ -93,6 +93,15 @@ def upsert_bill(
         if bill is not None:
             bill.external_id = external_id
 
+    # Herda custom_card_name se já existir para este pluggy_account_id
+    existing_custom = db.execute(
+        select(CreditCardBill.custom_card_name).where(
+            CreditCardBill.user_id == user_id,
+            CreditCardBill.pluggy_account_id == pluggy_account_id,
+            CreditCardBill.custom_card_name.isnot(None),
+        )
+    ).scalars().first()
+
     if bill is None:
         bill = CreditCardBill(
             user_id=user_id,
@@ -100,6 +109,7 @@ def upsert_bill(
             pluggy_account_id=pluggy_account_id,
             external_id=external_id,
             card_name=card_name,
+            custom_card_name=existing_custom,
             due_date=due_date,
             total_amount=total_amount,
             minimum_payment_amount=(
@@ -118,6 +128,8 @@ def upsert_bill(
         bill.allows_installments = allows_installments
         if card_name:
             bill.card_name = card_name
+        if existing_custom:
+            bill.custom_card_name = existing_custom
 
     bill.synced_at = datetime.now(timezone.utc)
 
@@ -128,8 +140,39 @@ def upsert_bill(
     return bill
 
 
+def update_bill_alias(
+    db: Session, user_id: UUID, bill_id: UUID, custom_card_name: Optional[str]
+) -> Optional[CreditCardBill]:
+    bill = db.execute(
+        select(CreditCardBill).where(
+            CreditCardBill.id == bill_id, CreditCardBill.user_id == user_id
+        )
+    ).scalar_one_or_none()
+
+    if bill is None:
+        return None
+
+    clean_name = custom_card_name.strip() if custom_card_name and custom_card_name.strip() else None
+
+    all_bills = db.execute(
+        select(CreditCardBill).where(
+            CreditCardBill.user_id == user_id,
+            CreditCardBill.pluggy_account_id == bill.pluggy_account_id,
+        )
+    ).scalars().all()
+
+    for b in all_bills:
+        b.custom_card_name = clean_name
+        db.add(b)
+        _sync_payable(db, b, b.bank_account)
+
+    db.commit()
+    db.refresh(bill)
+    return bill
+
+
 def _sync_payable(db: Session, bill: CreditCardBill, account: BankAccount) -> None:
-    label = bill.card_name or account.name
+    label = bill.custom_card_name or bill.card_name or account.name
     title = f"Fatura {label} — {bill.due_date.strftime('%m/%Y')}"
 
     if bill.payable_id is None:
@@ -165,3 +208,4 @@ def _sync_payable(db: Session, bill: CreditCardBill, account: BankAccount) -> No
         payable.amount = bill.total_amount
         payable.due_date = bill.due_date
     db.add(payable)
+

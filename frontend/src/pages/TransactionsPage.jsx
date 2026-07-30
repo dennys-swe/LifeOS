@@ -5,8 +5,9 @@ import { fmt } from "../lib/format";
 
 const TYPE_FILTERS = [
   { key: "all", label: "Todas" },
-  { key: "INCOME", label: "Entradas" },
   { key: "EXPENSE", label: "Saídas" },
+  { key: "INCOME", label: "Entradas" },
+  { key: "TRANSFERS", label: "Transferências" },
 ];
 
 export default function TransactionsPage({ month, year, onMonthChange }) {
@@ -14,6 +15,7 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [hideTransfers, setHideTransfers] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -36,21 +38,47 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
 
   const filtered = useMemo(() => {
     let list = transactions;
-    if (typeFilter !== "all") list = list.filter((t) => t.type === typeFilter);
+
+    if (typeFilter === "TRANSFERS") {
+      list = list.filter((t) => t.is_transfer);
+    } else if (typeFilter !== "all") {
+      list = list.filter((t) => t.type === typeFilter);
+      if (hideTransfers) {
+        list = list.filter((t) => !t.is_transfer);
+      }
+    } else if (hideTransfers) {
+      list = list.filter((t) => !t.is_transfer);
+    }
+
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((t) => t.description.toLowerCase().includes(q));
     }
     return list.sort((a, b) => b.date.localeCompare(a.date));
-  }, [transactions, typeFilter, search]);
+  }, [transactions, typeFilter, hideTransfers, search]);
 
-  const totalIncome = useMemo(
-    () => filtered.filter((t) => t.type === "INCOME").reduce((s, t) => s + Number(t.amount), 0),
-    [filtered]
+  const realExpensesSum = useMemo(
+    () =>
+      transactions
+        .filter((t) => t.type === "EXPENSE" && !t.is_transfer)
+        .reduce((s, t) => s + Number(t.amount), 0),
+    [transactions]
   );
-  const totalExpense = useMemo(
-    () => filtered.filter((t) => t.type === "EXPENSE").reduce((s, t) => s + Number(t.amount), 0),
-    [filtered]
+
+  const realIncomeSum = useMemo(
+    () =>
+      transactions
+        .filter((t) => t.type === "INCOME" && !t.is_transfer)
+        .reduce((s, t) => s + Number(t.amount), 0),
+    [transactions]
+  );
+
+  const transfersSum = useMemo(
+    () =>
+      transactions
+        .filter((t) => t.is_transfer)
+        .reduce((s, t) => s + Number(t.amount), 0),
+    [transactions]
   );
 
   const formatDate = (dateStr) => {
@@ -71,24 +99,28 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
         </header>
 
         {/* Summary cards */}
-        <section className="grid gap-4 sm:grid-cols-3">
+        <section className="grid gap-4 sm:grid-cols-4">
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <p className="text-xs text-gray-500 dark:text-slate-400">Total de registros</p>
             <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-slate-100">{filtered.length}</p>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <p className="text-xs text-gray-500 dark:text-slate-400">Entradas</p>
-            <p className="mt-1 text-xl font-semibold text-emerald-600 dark:text-emerald-400">{fmt(totalIncome)}</p>
+            <p className="text-xs text-gray-500 dark:text-slate-400">Entradas reais</p>
+            <p className="mt-1 text-xl font-semibold text-emerald-600 dark:text-emerald-400">{fmt(realIncomeSum)}</p>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <p className="text-xs text-gray-500 dark:text-slate-400">Saídas</p>
-            <p className="mt-1 text-xl font-semibold text-rose-600 dark:text-rose-400">{fmt(totalExpense)}</p>
+            <p className="text-xs text-gray-500 dark:text-slate-400">Gastos reais</p>
+            <p className="mt-1 text-xl font-semibold text-rose-600 dark:text-rose-400">{fmt(realExpensesSum)}</p>
+          </div>
+          <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <p className="text-xs text-gray-500 dark:text-slate-400">Transferências</p>
+            <p className="mt-1 text-xl font-semibold text-indigo-600 dark:text-indigo-400">{fmt(transfersSum)}</p>
           </div>
         </section>
 
         {/* Filters */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {TYPE_FILTERS.map((f) => (
               <button
                 key={f.key}
@@ -103,7 +135,20 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
                 {f.label}
               </button>
             ))}
+
+            {typeFilter !== "TRANSFERS" && (
+              <label className="ml-2 flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer dark:text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={hideTransfers}
+                  onChange={(e) => setHideTransfers(e.target.checked)}
+                  className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800"
+                />
+                Ocultar transferências
+              </label>
+            )}
           </div>
+
           <input
             type="text"
             value={search}
@@ -130,26 +175,44 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
                 className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/60"
               >
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <p className="truncate text-sm font-medium text-gray-900 dark:text-slate-100">{t.description}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-medium text-gray-900 dark:text-slate-100">{t.description}</p>
+                    {t.is_transfer && (
+                      <span
+                        title="Transferência entre contas / aporte — não conta no gasto do mês"
+                        className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
+                      >
+                        🔄 Transferência
+                      </span>
+                    )}
+                  </div>
                   <div className="flex min-w-0 items-center gap-2">
                     <p className="flex-shrink-0 text-xs text-gray-400 dark:text-slate-500">{formatDate(t.date)}</p>
-                    {t.source && (
-                      <span className="max-w-[7rem] truncate rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500 dark:bg-slate-800 dark:text-slate-400">
-                        {t.source}
+                    {t.external_category && (
+                      <span className="max-w-[8rem] truncate rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500 dark:bg-slate-800 dark:text-slate-400">
+                        {t.external_category}
                       </span>
                     )}
                   </div>
                 </div>
                 <div className="ml-4 flex flex-shrink-0 flex-col items-end gap-1">
-                  <p className={`text-sm font-semibold ${t.type === "INCOME" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                  <p className={`text-sm font-semibold ${
+                    t.is_transfer
+                      ? "text-indigo-600 dark:text-indigo-400"
+                      : t.type === "INCOME"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400"
+                  }`}>
                     {t.type === "INCOME" ? "+" : "−"}{fmt(Number(t.amount))}
                   </p>
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                    t.type === "INCOME"
+                    t.is_transfer
+                      ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
+                      : t.type === "INCOME"
                       ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
                       : "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
                   }`}>
-                    {t.type === "INCOME" ? "Entrada" : "Saída"}
+                    {t.is_transfer ? "Transferência" : t.type === "INCOME" ? "Entrada" : "Saída"}
                   </span>
                 </div>
               </div>
@@ -161,3 +224,4 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
     </div>
   );
 }
+

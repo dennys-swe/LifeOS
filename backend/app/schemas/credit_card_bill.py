@@ -14,8 +14,14 @@ class CreditCardBillResponse(BaseModel):
     id: UUID
     bank_account_id: UUID
     card_name: Optional[str] = None
+    custom_card_name: Optional[str] = None
     due_date: date
     total_amount: Decimal
     minimum_payment_amount: Optional[Decimal]
     allows_installments: Optional[bool]
     payable_id: Optional[UUID]
+
+
+class CreditCardBillUpdate(BaseModel):
+    custom_card_name: Optional[str] = None
+

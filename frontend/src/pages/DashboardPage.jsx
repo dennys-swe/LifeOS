@@ -22,12 +22,38 @@ function prevMonthYear(month, year) {
 }
 
 export default function DashboardPage({ month, year, onMonthChange }) {
-  const { summary, payables, loading } = useFinance();
+  const { summary, payables, loading, refresh } = useFinance();
   const [prevSummary, setPrevSummary] = useState(null);
   const [insights, setInsights] = useState([]);
   const [history, setHistory] = useState([]);
   const [upcoming, setUpcoming] = useState([]);
   const [bills, setBills] = useState([]);
+  const [editingBillId, setEditingBillId] = useState(null);
+  const [editingAliasValue, setEditingAliasValue] = useState("");
+
+  const handleStartEditAlias = (bill) => {
+    setEditingBillId(bill.id);
+    setEditingAliasValue(bill.custom_card_name || bill.card_name || "");
+  };
+
+  const handleSaveAlias = async (bill) => {
+    const val = editingAliasValue.trim();
+    setEditingBillId(null);
+    const newCustomName = val || null;
+
+    setBills((prev) =>
+      prev.map((b) => (b.id === bill.id ? { ...b, custom_card_name: newCustomName } : b))
+    );
+
+    try {
+      await api.patch(`/credit-card-bills/${bill.id}`, { custom_card_name: newCustomName });
+      refresh?.();
+    } catch {
+      // Revert if error
+      api.get("/credit-card-bills", { params: { month, year } }).then((r) => setBills(r.data ?? []));
+    }
+  };
+
 
   const [prevMonth, prevYear] = prevMonthYear(month, year);
 
@@ -277,31 +303,56 @@ export default function DashboardPage({ month, year, onMonthChange }) {
           </Card>
 
           <Card className="p-5">
-            <CardHeader title="Faturas de cartão" />
+            <CardHeader title="Faturas de cartão" subtitle="clique no nome para dar um apelido" />
             {bills.length === 0 ? (
               <EmptyState className="h-auto py-4">Nenhuma fatura neste mês.</EmptyState>
             ) : (
               <div className="flex flex-col gap-3">
-                {bills.map((bill) => (
-                  <div key={bill.id} className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      {bill.card_name && (
-                        <p className="truncate text-sm font-medium text-gray-900 dark:text-slate-100">
-                          {bill.card_name}
+                {bills.map((bill) => {
+                  const displayName = bill.custom_card_name || bill.card_name || "Cartão de Crédito";
+                  const isEditing = editingBillId === bill.id;
+                  return (
+                    <div key={bill.id} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={editingAliasValue}
+                            onChange={(e) => setEditingAliasValue(e.target.value)}
+                            onBlur={() => handleSaveAlias(bill)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleSaveAlias(bill);
+                              if (e.key === "Escape") setEditingBillId(null);
+                            }}
+                            placeholder="Apelido do cartão..."
+                            maxLength={100}
+                            className="w-full rounded-lg border border-gray-300 px-2 py-0.5 text-sm font-medium text-gray-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditAlias(bill)}
+                            title="Clique para definir apelido"
+                            className="group flex items-center gap-1.5 text-left text-sm font-medium text-gray-900 hover:underline dark:text-slate-100"
+                          >
+                            <span className="truncate">{displayName}</span>
+                            <span className="text-xs text-gray-400 opacity-0 group-hover:opacity-100 dark:text-slate-500">✏️</span>
+                          </button>
+                        )}
+                        <p className="text-xs text-gray-500 dark:text-slate-400">
+                          Vence em {new Date(`${bill.due_date}T00:00:00`).toLocaleDateString("pt-BR")}
                         </p>
-                      )}
-                      <p className="text-sm text-gray-700 dark:text-slate-300">
-                        Vence em {new Date(`${bill.due_date}T00:00:00`).toLocaleDateString("pt-BR")}
-                      </p>
+                      </div>
+                      <span className="flex-shrink-0 text-sm font-semibold text-gray-900 dark:text-slate-100">
+                        {fmt(bill.total_amount)}
+                      </span>
                     </div>
-                    <span className="flex-shrink-0 text-sm font-semibold text-gray-900 dark:text-slate-100">
-                      {fmt(bill.total_amount)}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </Card>
+
         </div>
 
         {/* Orçamento — movido pelo gasto real, não payables */}
