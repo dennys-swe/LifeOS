@@ -10,6 +10,7 @@ from app.api.endpoints.jobs import router as jobs_router
 from app.api.endpoints.payables import router as payables_router
 from app.api.endpoints.push_subscriptions import router as push_subscriptions_router
 from app.api.endpoints.recurring_payables import router as recurring_payables_router
+from app.api.endpoints.insights import router as insights_router
 from app.api.endpoints.summary import router as summary_router
 from app.api.endpoints.transactions import router as transactions_router
 from app.api.endpoints.webhooks import router as webhooks_router
@@ -43,6 +44,7 @@ app.include_router(transactions_router)
 app.include_router(categories_router)
 app.include_router(category_rules_router)
 app.include_router(summary_router)
+app.include_router(insights_router)
 app.include_router(budgets_router)
 app.include_router(bank_accounts_router)
 app.include_router(credit_card_bills_router)

@@ -27,3 +27,8 @@ class TransactionResponse(TransactionBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    # Expostos para o cliente conseguir reproduzir os totais do /summary, que
+    # exclui transferência. Sem isso, somar as transações na tela dá um número
+    # diferente do card ao lado.
+    is_transfer: bool = False
+    external_category: Optional[str] = None

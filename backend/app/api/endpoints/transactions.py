@@ -4,7 +4,7 @@ from datetime import date
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.users import current_active_user
@@ -40,6 +40,11 @@ def list_transactions(
     end_date: Optional[date] = None,
     month: Optional[int] = None,
     year: Optional[int] = None,
+    category_id: Optional[UUID] = None,
+    uncategorized: bool = False,
+    include_transfers: bool = True,
+    limit: Optional[int] = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
     return get_transactions(
         db=db,
@@ -49,6 +54,11 @@ def list_transactions(
         end_date=end_date,
         month=month,
         year=year,
+        category_id=category_id,
+        uncategorized=uncategorized,
+        include_transfers=include_transfers,
+        limit=limit,
+        offset=offset,
     )
 
 

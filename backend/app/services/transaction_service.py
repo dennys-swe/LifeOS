@@ -28,7 +28,17 @@ def get_transactions(
     end_date: Optional[date] = None,
     month: Optional[int] = None,
     year: Optional[int] = None,
+    category_id: Optional[UUID] = None,
+    uncategorized: bool = False,
+    include_transfers: bool = True,
+    limit: Optional[int] = None,
+    offset: int = 0,
 ) -> List[Transaction]:
+    """`include_transfers=False` casa com a definição de gasto do `/summary`.
+
+    `uncategorized=True` filtra `category_id IS NULL` — necessário porque o
+    drill-down da linha "Sem categoria" do dashboard não tem UUID para passar.
+    """
     query = select(Transaction).where(Transaction.user_id == user_id)
 
     if month is not None and year is not None:
@@ -42,8 +52,22 @@ def get_transactions(
         query = query.where(Transaction.date >= start_date)
     if end_date is not None:
         query = query.where(Transaction.date <= end_date)
+    if uncategorized:
+        query = query.where(Transaction.category_id.is_(None))
+    elif category_id is not None:
+        query = query.where(Transaction.category_id == category_id)
+    if not include_transfers:
+        query = query.where(Transaction.is_transfer.is_(False))
 
-    query = query.order_by(Transaction.date.desc())
+    # `id` desempata: sem um critério estável, duas transações do mesmo dia
+    # podem trocar de lugar entre páginas e sumir da paginação.
+    query = query.order_by(Transaction.date.desc(), Transaction.id.desc())
+
+    if offset:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+
     result = db.execute(query)
     return result.scalars().all()
 
