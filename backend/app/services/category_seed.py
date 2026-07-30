@@ -21,6 +21,10 @@ DEFAULT_CATEGORIES = [
     {"name": "Compras", "color_hex": "#A855F7"},
     {"name": "Taxas", "color_hex": "#EF4444"},
     {"name": "Seguros", "color_hex": "#0EA5E9"},
+    # PIX/TED/boleto para terceiros: é gasto (o dinheiro saiu de vez), mas não
+    # tem natureza de consumo. Sem essa categoria eram ~21% das transações
+    # entrando no total de despesa sem aparecer no "gastos por categoria".
+    {"name": "Transferências", "color_hex": "#64748B"},
 ]
 
 

@@ -27,10 +27,10 @@ TRANSFER_CATEGORIES = {
     "Fixed income",
 }
 
-# Transferência para terceiros (PIX, TED, boleto) **é** gasto — o dinheiro saiu.
-# Listado aqui só para deixar a decisão explícita e evitar que alguém as agrupe
-# com as de cima só porque o nome tem "Transfer".
-_THIRD_PARTY_TRANSFERS = {
+# Transferência para terceiros (PIX, TED, boleto) **é** gasto — o dinheiro saiu
+# de vez. Não entra em TRANSFER_CATEGORIES, mas também não é consumo, então tem
+# categoria própria em vez de ficar sem nenhuma (eram ~21% das transações).
+THIRD_PARTY_TRANSFERS = {
     "Transfers",
     "Transfer - PIX",
     "Transfer - TED",
@@ -99,6 +99,10 @@ PLUGGY_TO_CATEGORY = {
     # Seguros
     "Insurance": "Seguros",
 }
+
+# Derivado do conjunto acima em vez de repetido à mão: garante que os dois não
+# saiam de sincronia se uma variação nova de transferência aparecer.
+PLUGGY_TO_CATEGORY.update({nome: "Transferências" for nome in THIRD_PARTY_TRANSFERS})
 
 
 def is_transfer(pluggy_category: str | None) -> bool:

@@ -164,7 +164,9 @@ def test_same_person_transfer_is_marked_transfer(db_session, user):
 
 
 def test_third_party_transfer_is_a_real_expense(db_session, user):
-    """PIX pra outra pessoa é gasto: o dinheiro saiu de vez."""
+    """PIX pra outra pessoa é gasto: o dinheiro saiu de vez. E vai para a
+    categoria "Transferências" — é gasto sem natureza de consumo, mas ficar sem
+    categoria escondia ~21% das transações do "gastos por categoria"."""
     acc = _account(db_session, user)
 
     _sync(
@@ -176,6 +178,17 @@ def test_third_party_transfer_is_a_real_expense(db_session, user):
     tx = db_session.query(Transaction).one()
     assert tx.is_transfer is False
     assert tx.type == TransactionType.EXPENSE
+    assert db_session.get(Category, tx.category_id).name == "Transferências"
+
+
+def test_every_third_party_transfer_variant_is_mapped():
+    """Toda variação de transferência a terceiros tem destino — o mapa é
+    derivado do conjunto, então não dá para uma ficar de fora."""
+    from app.services.pluggy_category_map import THIRD_PARTY_TRANSFERS
+
+    for nome in THIRD_PARTY_TRANSFERS:
+        assert PLUGGY_TO_CATEGORY.get(nome) == "Transferências", nome
+        assert not is_transfer(nome), f"{nome} é gasto, não transferência interna"
 
 
 def test_investment_is_transfer_not_expense(db_session, user):
