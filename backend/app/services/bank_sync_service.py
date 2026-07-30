@@ -14,10 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
 from app.models.bank_account import BankAccount, BankAccountSyncStatus
+from app.models.category import Category
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate
 from app.services import bill_service
 from app.services.category_rule_service import build_keyword_map
+from app.services.category_seed import seed_default_categories
+from app.services.pluggy_category_map import category_name_for, is_transfer
 from app.services.pluggy_client import get_api_client
 from app.services.reconciliation_service import (
     auto_reconcile_confident_matches,
@@ -134,6 +137,27 @@ def _parse_pluggy_date(date_str: str) -> date_type:
     return datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
 
 
+def _transaction_type(tx: dict) -> TransactionType:
+    """Deriva INCOME/EXPENSE do campo `type` da Pluggy, não do sinal do valor.
+
+    O sinal **não** é consistente entre tipos de conta: em conta corrente a
+    saída vem negativa, mas em cartão de crédito a **compra vem positiva**
+    (verificado nos dados reais: `+15.99 type=DEBIT ANUIDADE`). Inferir pelo
+    sinal marcava toda compra de cartão como receita — mais da metade das
+    transações importadas ficou com o tipo invertido.
+
+    `type` vem explícito da API: DEBIT = saiu dinheiro, CREDIT = entrou.
+    """
+    pluggy_type = (tx.get("type") or "").upper()
+    if pluggy_type == "DEBIT":
+        return TransactionType.EXPENSE
+    if pluggy_type == "CREDIT":
+        return TransactionType.INCOME
+    # Sem `type` utilizável, cai no sinal — que é correto para conta corrente,
+    # de onde vêm os extratos CSV e as contas sem esse campo.
+    return TransactionType.INCOME if (tx.get("amount") or 0) > 0 else TransactionType.EXPENSE
+
+
 def sync_account(db: Session, account: BankAccount) -> dict:
     if not account.external_id:
         raise ValueError("Conta sem item_id da Pluggy. Conecte o banco primeiro.")
@@ -144,6 +168,16 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     bills_synced = 0
     new_transactions: List[Transaction] = []
     keyword_map = build_keyword_map(db, account.user_id)
+    # Garante que as categorias que o mapa da Pluggy referencia existem — quem
+    # se registrou antes de "Saúde"/"Compras"/"Taxas"/"Seguros" entrarem no
+    # DEFAULT_CATEGORIES ainda não as tem.
+    seed_default_categories(db, account.user_id)
+    category_ids_by_name = {
+        cat.name: cat.id
+        for cat in db.execute(
+            select(Category).where(Category.user_id == account.user_id)
+        ).scalars().all()
+    }
 
     with get_api_client() as ac:
         account_api = pluggy_sdk.AccountApi(ac)
@@ -211,19 +245,24 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         continue
 
                     amount_raw = tx.get("amount", 0) or 0
-                    tx_type = (
-                        TransactionType.INCOME
-                        if amount_raw > 0
-                        else TransactionType.EXPENSE
-                    )
+                    tx_type = _transaction_type(tx)
                     tx_date = _parse_pluggy_date(tx["date"]) if tx.get("date") else date_type.today()
                     description = (tx.get("description") or "")[:255]
                     normalized = description.upper()
+                    pluggy_category = tx.get("category")
+
+                    # Regra do usuário ganha da categoria da Pluggy: é override
+                    # explícito dele sobre a classificação automática.
                     category_id = None
                     for keyword, mapped_id in keyword_map.items():
                         if keyword in normalized:
                             category_id = UUID(mapped_id)
                             break
+                    if category_id is None:
+                        mapped_name = category_name_for(pluggy_category)
+                        if mapped_name:
+                            category_id = category_ids_by_name.get(mapped_name)
+
                     new_tx = Transaction(
                         user_id=account.user_id,
                         date=tx_date,
@@ -232,6 +271,8 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         type=tx_type,
                         source=source_key,
                         category_id=category_id,
+                        is_transfer=is_transfer(pluggy_category),
+                        external_category=(pluggy_category or None),
                     )
                     db.add(new_tx)
                     new_transactions.append(new_tx)

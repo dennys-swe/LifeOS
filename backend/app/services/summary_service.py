@@ -61,6 +61,11 @@ def get_summary(db: Session, user_id: UUID, month: int, year: int) -> SummaryRes
 
     transactions_by_category: dict = {}
     for t in transactions:
+        # Transferência é dinheiro mudando de lugar, não gasto nem receita:
+        # somá-la contaria a mesma grana duas vezes (a compra no cartão E a
+        # quitação da fatura; a saída de uma conta E a entrada na outra).
+        if t.is_transfer:
+            continue
         key = t.category_id
         transactions_by_category[key] = transactions_by_category.get(key, Decimal("0")) + Decimal(str(t.amount))
         if t.type == TransactionType.INCOME:

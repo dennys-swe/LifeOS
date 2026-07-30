@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import Date, Enum as SAEnum, ForeignKey, Index, Numeric, String, Uuid
+from sqlalchemy import Boolean, Date, Enum as SAEnum, ForeignKey, Index, Numeric, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -31,6 +31,15 @@ class Transaction(Base):
         SAEnum(TransactionType, name="transaction_type"), nullable=False
     )
     source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Dinheiro que só muda de lugar (quitação de fatura, transferência entre as
+    # próprias contas, aporte em investimento). Continua registrado, mas é
+    # excluído dos totais de gasto — senão a mesma grana conta duas vezes.
+    is_transfer: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # Categoria crua da Pluggy, preservada para permitir re-mapear sem
+    # re-consultar a API.
+    external_category: Mapped[str | None] = mapped_column(String(80), nullable=True)
     category_id: Mapped[Uuid | None] = mapped_column(
         Uuid, ForeignKey("categories.id"), nullable=True
     )

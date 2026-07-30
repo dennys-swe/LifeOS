@@ -42,6 +42,40 @@ def _transaction(db_session, user, amount, tx_date=None, tx_type=TransactionType
     return t
 
 
+def test_card_side_bill_payment_stays_reconcilable(db_session, user):
+    """Do lado do cartão a quitação vem `type=CREDIT` da Pluggy (o pagamento
+    entra no cartão), então virou INCOME quando passamos a respeitar o `type`.
+    Ela precisa continuar casando com o payable da fatura — é a única ponta
+    disponível quando a conta de onde saiu o dinheiro não está conectada."""
+    p = _payable(db_session, user, Decimal("120.12"), date(2026, 5, 10))
+    tx = Transaction(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="Pagamento recebido",
+        amount=Decimal("120.12"),
+        type=TransactionType.INCOME,
+        is_transfer=True,
+        external_category="Credit card payment",
+    )
+    db_session.add(tx)
+    db_session.commit()
+
+    sugestoes = suggest_reconciliation(db_session, user.id, [tx])
+
+    assert [s.payable_id for s in sugestoes] == [p.id]
+
+
+def test_plain_income_is_not_reconcilable(db_session, user):
+    """Receita comum não quita conta — só a quitação de fatura é exceção."""
+    _payable(db_session, user, Decimal("120.12"), date(2026, 5, 10))
+    tx = _transaction(
+        db_session, user, Decimal("120.12"), date(2026, 5, 10), TransactionType.INCOME
+    )
+
+    assert suggest_reconciliation(db_session, user.id, [tx]) == []
+
+
 def _bill_payable(db_session, user, amount, due_date):
     """Cria um payable de fatura (linkado a um CreditCardBill), diferente de
     _payable — é o que ativa a heurística de "eco" de pagamento de fatura."""

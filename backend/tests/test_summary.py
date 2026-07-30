@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from datetime import date, timedelta
 
 from app.models.category import Category
@@ -21,7 +22,16 @@ def _make_payable(db_session, user, amount, status=PayableStatus.PENDING, month=
     return p
 
 
-def _make_transaction(db_session, user, amount, tx_type=TransactionType.EXPENSE, month=5, year=2026, category_id=None):
+def _make_transaction(
+    db_session,
+    user,
+    amount,
+    tx_type=TransactionType.EXPENSE,
+    month=5,
+    year=2026,
+    category_id=None,
+    is_transfer=False,
+):
     t = Transaction(
         id=uuid.uuid4(),
         user_id=user.id,
@@ -30,10 +40,38 @@ def _make_transaction(db_session, user, amount, tx_type=TransactionType.EXPENSE,
         amount=amount,
         type=tx_type,
         category_id=category_id,
+        is_transfer=is_transfer,
     )
     db_session.add(t)
     db_session.commit()
     return t
+
+
+def test_transfer_is_excluded_from_totals(db_session, user, client):
+    """Transferência é dinheiro mudando de lugar — somá-la contaria a mesma
+    grana duas vezes (a compra no cartão E a quitação da fatura)."""
+    _make_transaction(db_session, user, 100, TransactionType.EXPENSE)
+    _make_transaction(db_session, user, 900, TransactionType.EXPENSE, is_transfer=True)
+    _make_transaction(db_session, user, 500, TransactionType.INCOME, is_transfer=True)
+
+    data = client.get("/summary?month=5&year=2026").json()
+
+    assert Decimal(data["total_expenses"]) == Decimal("100")
+    assert Decimal(data["total_income"]) == Decimal("0")
+
+
+def test_transfer_is_excluded_from_by_category(db_session, user, client):
+    cat = Category(user_id=user.id, name="Mercado X", color_hex="#84CC16")
+    db_session.add(cat)
+    db_session.commit()
+
+    _make_transaction(db_session, user, 40, category_id=cat.id)
+    _make_transaction(db_session, user, 960, category_id=cat.id, is_transfer=True)
+
+    data = client.get("/summary?month=5&year=2026").json()
+    linha = next(c for c in data["by_category"] if c["category_name"] == "Mercado X")
+
+    assert Decimal(linha["total_transactions"]) == Decimal("40")
 
 
 def test_summary_empty_month(client):

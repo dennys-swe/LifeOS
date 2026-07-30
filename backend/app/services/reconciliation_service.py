@@ -6,13 +6,14 @@ from decimal import Decimal
 from typing import List
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.credit_card_bill import CreditCardBill
 from app.models.payable import Payable, PayableStatus
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.reconciliation import ReconciliationSuggestionResponse
+from app.services.pluggy_category_map import CREDIT_CARD_PAYMENT
 
 AMOUNT_TOLERANCE = Decimal("0.05")
 DATE_TOLERANCE_DAYS = 7
@@ -23,6 +24,30 @@ DATE_TOLERANCE_DAYS = 7
 # com um desses textos fixos, no mesmo valor. Não é ambiguidade real: é o
 # mesmo evento contado duas vezes.
 GENERIC_BILL_PAYMENT_ECHOES = {"PAGAMENTO RECEBIDO", "PAGAMENTO COM SALDO"}
+
+
+def _reconcilable(tx: Transaction) -> bool:
+    """Uma transação pode quitar um payable?
+
+    Além das despesas, inclui a quitação de fatura: do lado do **cartão** ela
+    vem como `type=CREDIT` da Pluggy (o pagamento entra no cartão), então viraria
+    INCOME e sairia da conciliação — mas é exatamente ela que casa com o payable
+    da fatura quando a conta de onde saiu o dinheiro não está conectada.
+    `_confirm_bill_payment_echoes` já sabe preferir o débito real quando as duas
+    pontas aparecem.
+    """
+    return (
+        tx.type == TransactionType.EXPENSE
+        or tx.external_category == CREDIT_CARD_PAYMENT
+    )
+
+
+def _is_reconcilable():
+    """Versão SQL de `_reconcilable`, para filtrar na query."""
+    return or_(
+        Transaction.type == TransactionType.EXPENSE,
+        Transaction.external_category == CREDIT_CARD_PAYMENT,
+    )
 
 
 def _amount_in_range(payable_amount: Decimal, tx_amount: Decimal) -> bool:
@@ -53,7 +78,7 @@ def suggest_pending(db: Session, user_id: UUID) -> List[ReconciliationSuggestion
     unreconciled = db.execute(
         select(Transaction).where(
             Transaction.user_id == user_id,
-            Transaction.type == TransactionType.EXPENSE,
+            _is_reconcilable(),
             ~Transaction.id.in_(
                 select(Payable.transaction_id).where(
                     Payable.user_id == user_id, Payable.transaction_id.is_not(None)
@@ -91,7 +116,7 @@ def suggest_reconciliation(
     suggestions: List[ReconciliationSuggestionResponse] = []
 
     for tx in transactions:
-        if tx.type != TransactionType.EXPENSE:
+        if not _reconcilable(tx):
             continue
 
         tx_amount = Decimal(str(tx.amount))

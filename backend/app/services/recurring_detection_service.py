@@ -31,6 +31,10 @@ def detect_recurring_candidates(db: Session, user_id: UUID) -> List[RecurringSug
         select(Transaction).where(
             Transaction.user_id == user_id,
             Transaction.type == TransactionType.EXPENSE,
+            # Transferência recorrente entre as próprias contas não é conta a
+            # pagar — e é volumosa (219 "Same person transfer" no extrato real
+            # do dono), então dominava as sugestões.
+            Transaction.is_transfer.is_(False),
         )
     ).scalars().all()
 

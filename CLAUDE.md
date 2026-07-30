@@ -37,6 +37,10 @@ cd backend && python -m app.jobs.daily_sync
 
 O backend exige um arquivo `backend/.env` com `DATABASE_URL`, `SECRET_KEY` (JWT), `CORS_ORIGINS`, `CRON_SECRET`, `PLUGGY_CLIENT_ID`/`PLUGGY_CLIENT_SECRET` e as chaves VAPID (ver `.env.example`). Testes usam SQLite em memória — sem necessidade de banco real, e não passam pelo Alembic (schema vem direto dos models via `Base.metadata.create_all`).
 
+> ⚠️ **Não existe ambiente de desenvolvimento isolado.** O `backend/.env` local aponta para o **banco de produção** (Neon), e o webhook da Pluggy está registrado apontando para o **backend de produção** (Render). Duas consequências que já causaram problema real:
+> - Rodar o backend local escreve em dados de produção.
+> - **Corrigir lógica de sync localmente não protege os dados**: quem recebe o webhook (`item/created` ao conectar um banco) e o cron diário é o Render, com o código que estiver deployado. Ao consertar algo que o sync grava errado, **deploy primeiro, limpeza dos dados depois** — na ordem inversa, o próximo evento da Pluggy recria o problema.
+
 Config central em `app/core/config.py` (`pydantic-settings`) — nunca usar `os.getenv` solto em código novo, sempre `from app.core.config import settings`.
 
 ### Frontend
@@ -78,6 +82,7 @@ Camadas FastAPI seguindo o padrão: **Router → Service → SQLAlchemy ORM → 
 ### Integração Pluggy (Open Finance)
 
 - `app/services/pluggy_client.py` — autentica com `PLUGGY_CLIENT_ID`/`SECRET` (credenciais da aplicação, cache de api_key em memória). O isolamento por usuário vem de `bank_accounts.user_id`, não de um campo da Pluggy (o SDK instalado não expõe `clientUserId` no `ConnectTokenRequest`).
+- `app/services/pluggy_category_map.py` — mapeia as ~61 categorias que a Pluggy atribui (`Groceries`, `Gas stations`, ...) para as 10 categorias padrão do usuário, e define quais são **transferência**. Mapa explícito de propósito: categoria nova que a Pluggy inventar fica sem categoria em vez de ser adivinhada errado, e `Transaction.external_category` guarda o valor cru pra descobrir o que completar.
 - `app/services/bank_sync_service.sync_account` — sincroniza transações (dedup por `(user_id, source="pluggy:{tx_id}")`) e, para contas `type == "CREDIT"`, também as faturas via `bill_service`. Usa `*_without_preload_content` + `json.loads` como workaround de um bug de validação Pydantic do SDK (`CreditCardMetadata.payeeMCC`); o mesmo padrão foi replicado para `BillApi.bills_list_without_preload_content`. Ao final, roda `suggest_reconciliation` + `auto_reconcile_confident_matches` sobre as transações recém-importadas.
 - `app/services/bill_service.py` — upsert de `CreditCardBill` por `(user_id, external_id)` e geração/atualização automática do `Payable` correspondente (nunca atualiza um payable já `PAID`).
 - Faturas só existem em conexões Open Finance Regulado — falha ao buscar degrada para lista vazia (não derruba o sync de transações), mas **loga em stderr** (`[bank_sync] bills indisponíveis ...`). Se a geração automática de `Payable` de fatura parar de acontecer, esse log é o primeiro lugar a olhar.
@@ -135,7 +140,7 @@ SPA roteada com **react-router** (`BrowserRouter`).
 | `User` | Conta de usuário (fastapi-users): email, hashed_password, is_active/superuser/verified |
 | `Payable` | Conta a pagar. `user_id` obrigatório. FKs nullable: `recurring_payable_id` (ondelete=SET NULL), `transaction_id` (ondelete=SET NULL) |
 | `RecurringPayable` | Template de recorrência (title, amount, day_of_month, active, start_date/end_date). `user_id` obrigatório |
-| `Transaction` | Transação de extrato bancário. `user_id` obrigatório; índice composto `(user_id, source)` para dedup do sync Pluggy |
+| `Transaction` | Transação de extrato bancário. `user_id` obrigatório; índice composto `(user_id, source)` para dedup do sync Pluggy. `is_transfer` exclui dos totais de gasto; `external_category` guarda a categoria crua da Pluggy |
 | `Category` | Categoria com cor (color_hex), por usuário. `UniqueConstraint(user_id, name)`. Seed de 6 categorias padrão no registro |
 | `CategoryRule` | Regra de categorização por keyword (armazenada em UPPERCASE). `user_id` obrigatório |
 | `Budget` | Orçamento mensal por categoria. `UniqueConstraint(user_id, category_id, month, year)` |
@@ -156,6 +161,10 @@ SPA roteada com **react-router** (`BrowserRouter`).
 **`upsert_bill` (bill_service):** upsert de `CreditCardBill` por `(user_id, external_id)`; gera um `Payable` na primeira sincronização e atualiza valor/vencimento nas seguintes **só se o payable ainda estiver PENDING** (nunca sobrescreve valor/vencimento de um já pago). O **título** é exceção: é recalculado sempre, inclusive em payable pago, porque é só rótulo — payables criados antes de `card_name` ser gravado ficaram como `Fatura {nome da conexão}` e, com o MeuPluggy, dois cartões do mesmo mês viravam títulos idênticos.
 
 **`is_in_payable_window` (bill_service):** o `Payable` só é **criado** se o vencimento da fatura cair no mês atual ou no seguinte. Motivo: a Pluggy devolve o histórico inteiro do cartão e, em alguns bancos, também faturas **projetadas** de parcelamento — um cartão do Inter veio com 48 faturas, a mais distante vencendo ~1 ano à frente. Sem a janela, fatura antiga não conciliada fica `PENDING` pra sempre (aparece como "vencida" que não se deve) e projeção futura polui meses à frente com valor que ainda vai mudar. Fora da janela a fatura **continua salva** como `CreditCardBill` — o histórico segue disponível para análise (`detect_recurring_candidates`, comparação de categorias), só não vira obrigação a pagar. A janela filtra apenas a criação: payable que já existe continua sendo mantido em sincronia.
+
+**Tipo da transação vem do campo `type` da Pluggy, nunca do sinal do valor** (`_transaction_type` em `bank_sync_service`). O sinal **não** é consistente entre tipos de conta: em conta corrente a saída vem negativa, mas em **cartão de crédito a compra vem positiva** (`+15.99 type=DEBIT ANUIDADE`, verificado na API). Inferir pelo sinal marcava toda compra de cartão como receita — nos dados reais do dono, mais da metade das transações ficou invertida (1343 INCOME / 683 EXPENSE, quando a Pluggy reporta 1584 DEBIT / 439 CREDIT). Sem `type` (extrato CSV), cai no sinal, que é correto para conta corrente.
+
+**Transferência (`Transaction.is_transfer`)** marca dinheiro que só muda de lugar: quitação de fatura, transferência entre as próprias contas (`Same person transfer`), aporte em investimento. `summary_service` **exclui** transferências dos totais e do por-categoria — senão a mesma grana conta duas vezes (a compra no cartão **e** a quitação da fatura). Decisões explícitas: PIX/TED/boleto **para terceiros é gasto** (o dinheiro saiu de vez); aporte em investimento **não é** gasto (o dinheiro continua seu). `recurring_detection` também exclui transferências (219 `Same person transfer` dominavam as sugestões). Já a **conciliação inclui** a quitação de fatura mesmo sendo `type=CREDIT` do lado do cartão (`_reconcilable`) — é a única ponta disponível quando a conta pagadora não está conectada.
 
 **`detect_recurring_candidates` (recurring_detection_service):** agrupa transações EXPENSE por descrição normalizada (maiúsculas, sem dígitos); exige ≥3 meses distintos, valor dentro de ±10% da mediana e dia do mês com desvio ≤3 do modo. Exclui títulos que já têm `RecurringPayable` cadastrado.
 
