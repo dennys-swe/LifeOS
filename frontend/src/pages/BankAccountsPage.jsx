@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import api from "../services/api";
 import { useFinance } from "../context/FinanceContext";
-
-const fmt = (value) =>
-  Number(value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+import { fmt } from "../lib/format";
 
 function confidenceColor(score) {
   if (score >= 0.9) return "bg-emerald-500";

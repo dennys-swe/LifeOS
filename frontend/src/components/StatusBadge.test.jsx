@@ -3,22 +3,35 @@ import { render, screen } from "@testing-library/react";
 
 import StatusBadge from "./StatusBadge";
 
+// Assert em texto/precedência, não em classe Tailwind literal — a classe
+// exata muda toda vez que o componente é reestilizado (ex: suporte a tema
+// claro), e isso não é o que o teste quer garantir.
 describe("StatusBadge", () => {
-  it("mostra o badge PAGO com classe verde", () => {
+  it("mostra PAGO quando status é PAID", () => {
     render(<StatusBadge status="PAID" isOverdue={false} isDueToday={false} />);
-    const badge = screen.getByText("PAGO");
-    expect(badge).toHaveClass("text-emerald-300");
+    expect(screen.getByText("PAGO")).toBeInTheDocument();
   });
 
-  it("mostra o badge ATRASADA com classe vermelha", () => {
+  it("mostra ATRASADA quando pendente e vencida", () => {
     render(<StatusBadge status="PENDING" isOverdue isDueToday={false} />);
-    const badge = screen.getByText("ATRASADA");
-    expect(badge).toHaveClass("text-rose-300");
+    expect(screen.getByText("ATRASADA")).toBeInTheDocument();
   });
 
-  it("mostra o badge VENCE HOJE com classe amarela", () => {
+  it("mostra VENCE HOJE quando pendente e vence hoje", () => {
     render(<StatusBadge status="PENDING" isOverdue={false} isDueToday />);
-    const badge = screen.getByText("VENCE HOJE");
-    expect(badge).toHaveClass("text-amber-300");
+    expect(screen.getByText("VENCE HOJE")).toBeInTheDocument();
+  });
+
+  it("PAID tem precedência sobre atrasada/vence hoje", () => {
+    render(<StatusBadge status="PAID" isOverdue isDueToday />);
+    expect(screen.getByText("PAGO")).toBeInTheDocument();
+    expect(screen.queryByText("ATRASADA")).not.toBeInTheDocument();
+  });
+
+  it("não renderiza nada quando pendente, sem atraso e não vence hoje", () => {
+    const { container } = render(
+      <StatusBadge status="PENDING" isOverdue={false} isDueToday={false} />
+    );
+    expect(container).toBeEmptyDOMElement();
   });
 });

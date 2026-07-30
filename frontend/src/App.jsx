@@ -5,6 +5,7 @@ import { AuthProvider } from "./context/AuthContext";
 import ProtectedLayout from "./components/ProtectedLayout";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import CategoryDetailPage from "./pages/CategoryDetailPage";
 import DashboardPage from "./pages/DashboardPage";
 import PayablesPage from "./pages/PayablesPage";
 import TransactionsPage from "./pages/TransactionsPage";
@@ -45,6 +46,7 @@ export default function App() {
 
           <Route element={<ProtectedLayout />}>
             <Route path="/" element={<DashboardRoute />} />
+            <Route path="/categoria/:id" element={<CategoryDetailPage />} />
             <Route path="/payables" element={<PayablesRoute />} />
             <Route path="/transactions" element={<TransactionsRoute />} />
             <Route path="/banks" element={<BankAccountsPage />} />

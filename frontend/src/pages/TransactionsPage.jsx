@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../services/api";
 import MonthNavigator from "../components/MonthNavigator";
-
-const fmt = (value) =>
-  Number(value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+import { fmt } from "../lib/format";
 
 const TYPE_FILTERS = [
   { key: "all", label: "Todas" },

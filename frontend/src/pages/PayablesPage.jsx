@@ -7,6 +7,7 @@ import MonthNavigator from "../components/MonthNavigator";
 import StatusBadge from "../components/StatusBadge";
 import Toast from "../components/Toast";
 import { useFinance } from "../context/FinanceContext";
+import { fmt } from "../lib/format";
 import RecurringPayablesPage from "./RecurringPayablesPage";
 
 const FILTERS = {
@@ -73,13 +74,6 @@ export default function PayablesPage({
   const dueTodayCount = useMemo(() => {
     return payablesThisMonth.filter((item) => item.due_date === todayStr).length;
   }, [payablesThisMonth, todayStr]);
-
-  const formatCurrency = (value) => {
-    return value.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-  };
 
   const categoryMap = useMemo(() => {
     return new Map(categories.map((category) => [category.id, category]));
@@ -208,7 +202,7 @@ export default function PayablesPage({
                 ? "text-rose-600 dark:text-rose-400"
                 : "text-amber-600 dark:text-amber-400"
             }`}>
-              {formatCurrency(Number(item.amount) || 0)}
+              {fmt(Number(item.amount) || 0)}
             </p>
             {item.status !== "PAID" && (
               <button
