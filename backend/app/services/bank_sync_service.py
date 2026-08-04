@@ -166,6 +166,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     imported = 0
     skipped = 0
     bills_synced = 0
+    open_bills_synced = 0
     new_transactions: List[Transaction] = []
     keyword_map = build_keyword_map(db, account.user_id)
     # Garante que as categorias que o mapa da Pluggy referencia existem — quem
@@ -187,8 +188,16 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         pluggy_accounts = account_api.accounts_list(item_id=item_id).results or []
 
         for pluggy_acct in pluggy_accounts:
-            if getattr(pluggy_acct, "type", None) == "CREDIT":
-                card_name = getattr(pluggy_acct, "marketing_name", None) or getattr(pluggy_acct, "name", None)
+            is_credit = getattr(pluggy_acct, "type", None) == "CREDIT"
+            card_name = getattr(pluggy_acct, "marketing_name", None) or getattr(
+                pluggy_acct, "name", None
+            )
+            # Guardadas apenas para cartão: alimentam a reconstrução da fatura
+            # em aberto, que precisa do conjunto completo (inclusive as já
+            # importadas em syncs anteriores).
+            raw_card_transactions: List[dict] = []
+
+            if is_credit:
                 try:
                     # Mesmo workaround do sync de transações: bypass da validação
                     # Pydantic do SDK usando o JSON bruto.
@@ -230,6 +239,9 @@ def sync_account(db: Session, account: BankAccount) -> dict:
 
                 if not transactions:
                     break
+
+                if is_credit:
+                    raw_card_transactions.extend(transactions)
 
                 for tx in transactions:
                     source_key = f"pluggy:{tx['id']}"
@@ -282,6 +294,28 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                     break
                 page += 1
 
+            if is_credit:
+                # Depois das faturas fechadas: a reconstrução do ciclo aberto se
+                # apoia na última delas para saber o dia de vencimento do cartão.
+                try:
+                    if bill_service.upsert_open_bill(
+                        db,
+                        account.user_id,
+                        account,
+                        pluggy_acct.id,
+                        raw_card_transactions,
+                        card_name=card_name,
+                    ) is not None:
+                        open_bills_synced += 1
+                except Exception as exc:  # noqa: BLE001
+                    # Estimativa é acessório: falhar aqui não pode derrubar o
+                    # sync de transações e faturas, que são o dado oficial.
+                    db.rollback()
+                    _log(
+                        f"fatura em aberto indisponível (account={pluggy_acct.id} "
+                        f"card={card_name!r}): {type(exc).__name__}: {exc}"
+                    )
+
     account.last_sync_at = datetime.now(timezone.utc)
     db.commit()
     for tx in new_transactions:
@@ -295,6 +329,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         "imported": imported,
         "skipped": skipped,
         "bills_synced": bills_synced,
+        "open_bills_synced": open_bills_synced,
         "auto_reconciled": len(auto_confirmed),
         "suggestions": remaining_suggestions,
     }

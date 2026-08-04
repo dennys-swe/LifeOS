@@ -1,12 +1,37 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Numeric,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+
+
+class CreditCardBillStatus(str, Enum):
+    """Fatura fechada pelo banco vs. ciclo ainda em aberto.
+
+    `CLOSED` vem da Bills API da Pluggy — é o valor oficial e definitivo.
+    `OPEN` é reconstruída a partir das transações do ciclo corrente, porque a
+    Bills API só publica a fatura depois do fechamento (dias ou semanas de
+    atraso, variando por banco). Só fatura `CLOSED` vira `Payable`: o valor de
+    uma fatura aberta muda a cada compra, não é obrigação firme.
+    """
+
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
 
 
 class CreditCardBill(Base):
@@ -28,6 +53,12 @@ class CreditCardBill(Base):
     custom_card_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
     total_amount: Mapped[Numeric] = mapped_column(Numeric(12, 2), nullable=False)
+    status: Mapped[CreditCardBillStatus] = mapped_column(
+        SAEnum(CreditCardBillStatus, name="credit_card_bill_status"),
+        nullable=False,
+        default=CreditCardBillStatus.CLOSED,
+        server_default=CreditCardBillStatus.CLOSED.value,
+    )
     minimum_payment_amount: Mapped[Numeric | None] = mapped_column(Numeric(12, 2), nullable=True)
     allows_installments: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     payable_id: Mapped[Uuid | None] = mapped_column(

@@ -10,8 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.bank_account import BankAccount
-from app.models.credit_card_bill import CreditCardBill
+from app.models.credit_card_bill import CreditCardBill, CreditCardBillStatus
 from app.models.payable import Payable, PayableStatus
+from app.services import open_bill_service
 
 
 def list_bills(
@@ -112,6 +113,7 @@ def upsert_bill(
             custom_card_name=existing_custom,
             due_date=due_date,
             total_amount=total_amount,
+            status=CreditCardBillStatus.CLOSED,
             minimum_payment_amount=(
                 Decimal(str(minimum_payment)) if minimum_payment is not None else None
             ),
@@ -120,6 +122,9 @@ def upsert_bill(
         db.add(bill)
         db.flush()
     else:
+        # Vindo da Bills API, o valor é oficial: se este registro era a
+        # reconstrução do ciclo em aberto, ele agora vira a fatura fechada.
+        bill.status = CreditCardBillStatus.CLOSED
         bill.due_date = due_date
         bill.total_amount = total_amount
         bill.minimum_payment_amount = (
@@ -135,6 +140,92 @@ def upsert_bill(
 
     _sync_payable(db, bill, account)
 
+    db.commit()
+    db.refresh(bill)
+    return bill
+
+
+def upsert_open_bill(
+    db: Session,
+    user_id: UUID,
+    account: BankAccount,
+    pluggy_account_id: str,
+    transactions: List[dict],
+    card_name: Optional[str] = None,
+    today: Optional[date] = None,
+) -> Optional[CreditCardBill]:
+    """Reconstrói e salva a fatura do ciclo em aberto deste cartão.
+
+    Só faz sentido quando existe uma fatura fechada anterior: é dela que saem o
+    dia de vencimento do cartão e o corte que separa o ciclo novo do anterior.
+    Se o banco já publicou a fatura do próximo vencimento (caso do Inter, que
+    projeta com meses de antecedência), não há ciclo em aberto a estimar.
+    """
+    today = today or date.today()
+
+    closed = db.execute(
+        select(CreditCardBill)
+        .where(
+            CreditCardBill.user_id == user_id,
+            CreditCardBill.pluggy_account_id == pluggy_account_id,
+            CreditCardBill.status == CreditCardBillStatus.CLOSED,
+        )
+        .order_by(CreditCardBill.due_date.desc())
+    ).scalars().first()
+
+    if closed is None:
+        return None
+
+    target_due = open_bill_service.next_due_date(closed.due_date, today)
+    if target_due <= closed.due_date:
+        return None
+
+    # O Inter publica faturas projetadas com quase um ano de antecedência, então
+    # "o mês seguinte à última fechada" cai em 2027 — não existe ciclo aberto a
+    # estimar ali. A mesma janela que decide se uma fatura vira Payable serve
+    # aqui: fora dela não é o ciclo corrente.
+    if not is_in_payable_window(target_due, today):
+        return None
+
+    amount = open_bill_service.compute_open_bill_amount(
+        transactions, target_due, closed.due_date
+    )
+
+    bill = db.execute(
+        select(CreditCardBill).where(
+            CreditCardBill.user_id == user_id,
+            CreditCardBill.pluggy_account_id == pluggy_account_id,
+            CreditCardBill.due_date >= target_due.replace(day=1),
+            CreditCardBill.due_date < _first_day_of_next_month(target_due),
+        )
+    ).scalar_one_or_none()
+
+    if bill is not None and bill.status == CreditCardBillStatus.CLOSED:
+        # O banco fechou a fatura desse vencimento entre um sync e outro — o
+        # valor oficial manda, nada a estimar.
+        return bill
+
+    if bill is None:
+        bill = CreditCardBill(
+            user_id=user_id,
+            bank_account_id=account.id,
+            pluggy_account_id=pluggy_account_id,
+            external_id=f"open:{pluggy_account_id}:{target_due:%Y-%m}",
+            card_name=card_name,
+            custom_card_name=closed.custom_card_name,
+            due_date=target_due,
+            total_amount=amount,
+            status=CreditCardBillStatus.OPEN,
+        )
+        db.add(bill)
+    else:
+        bill.due_date = target_due
+        bill.total_amount = amount
+        if card_name:
+            bill.card_name = card_name
+        bill.custom_card_name = closed.custom_card_name
+
+    bill.synced_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(bill)
     return bill
@@ -174,6 +265,12 @@ def update_bill_alias(
 def _sync_payable(db: Session, bill: CreditCardBill, account: BankAccount) -> None:
     label = bill.custom_card_name or bill.card_name or account.name
     title = f"Fatura {label} — {bill.due_date.strftime('%m/%Y')}"
+
+    # Fatura em aberto muda de valor a cada compra do ciclo — vira obrigação a
+    # pagar só quando o banco fecha. Quando isso acontece o mesmo registro passa
+    # a CLOSED e cai no fluxo normal abaixo.
+    if bill.status == CreditCardBillStatus.OPEN:
+        return
 
     if bill.payable_id is None:
         # Só a criação é filtrada: um payable que já existe continua sendo

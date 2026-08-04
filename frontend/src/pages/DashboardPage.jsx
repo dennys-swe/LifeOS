@@ -38,6 +38,26 @@ function IconPencil({ className }) {
   );
 }
 
+function BillStatusBadge({ status }) {
+  const isOpen = status === "OPEN";
+  return (
+    <span
+      title={
+        isOpen
+          ? "O banco ainda não fechou esta fatura — valor reconstruído dos lançamentos do ciclo e sujeito a mudar"
+          : "Fatura fechada pelo banco — valor definitivo"
+      }
+      className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+        isOpen
+          ? "border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+          : "border border-slate-400/30 bg-slate-500/10 text-slate-600 dark:text-slate-400"
+      }`}
+    >
+      {isOpen ? "Aberta" : "Fechada"}
+    </span>
+  );
+}
+
 export default function DashboardPage({ month, year, onMonthChange }) {
   const { summary, payables, loading, refresh } = useFinance();
   const [prevSummary, setPrevSummary] = useState(null);
@@ -300,9 +320,12 @@ export default function DashboardPage({ month, year, onMonthChange }) {
                               <IconPencil className="h-3.5 w-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                             </button>
                           )}
-                          <p className="text-xs text-slate-400 dark:text-slate-500">
-                            Vence em {new Date(`${bill.due_date}T00:00:00`).toLocaleDateString("pt-BR")}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-slate-400 dark:text-slate-500">
+                              Vence em {new Date(`${bill.due_date}T00:00:00`).toLocaleDateString("pt-BR")}
+                            </p>
+                            <BillStatusBadge status={bill.status} />
+                          </div>
                         </div>
                       </div>
 

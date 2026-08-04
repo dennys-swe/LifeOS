@@ -1,9 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import api from "../services/api";
 import ConfirmModal from "../components/ConfirmModal";
 import Card, { CardHeader } from "../components/ui/Card";
 import EmptyState from "../components/ui/EmptyState";
 import { fmt } from "../lib/format";
+
+const PLUGGY_CONNECT_CDN = "https://cdn.pluggy.ai/pluggy-connect/latest/pluggy-connect.js";
+
+function loadPluggyScript() {
+  return new Promise((resolve, reject) => {
+    if (window.PluggyConnect) { resolve(); return; }
+    const script = document.createElement("script");
+    script.src = PLUGGY_CONNECT_CDN;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
 
 function IconBank({ className }) {
   return (
@@ -29,7 +42,10 @@ export default function BankAccountsPage() {
   const [loading, setLoading] = useState(false);
   const [syncingId, setSyncingId] = useState(null);
   const [confirmMatch, setConfirmMatch] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [connecting, setConnecting] = useState(false);
   const [msg, setMsg] = useState("");
+  const pluggyRef = useRef(null);
 
   const load = async () => {
     setLoading(true);
@@ -46,6 +62,55 @@ export default function BankAccountsPage() {
   };
 
   useEffect(() => { load(); }, []);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    setMsg("");
+    try {
+      await loadPluggyScript();
+      const { data } = await api.post("/bank-accounts/connect-token");
+
+      pluggyRef.current = new window.PluggyConnect({
+        connectToken: data.access_token,
+        onSuccess: async ({ item }) => {
+          try {
+            // Sem nome: o backend deriva das accounts da Pluggy. Com o conector
+            // MeuPluggy, item.connector.name é sempre "MeuPluggy" — usá-lo aqui
+            // deixaria todos os bancos conectados com o mesmo rótulo.
+            await api.post("/bank-accounts", {
+              account_type: "checking",
+              external_id: item.id,
+            });
+            setMsg("Banco conectado! Clique em Sincronizar para importar transações.");
+            await load();
+          } catch {
+            setMsg("Banco conectado, mas falha ao salvar. Tente novamente.");
+          }
+        },
+        onError: (err) => {
+          setMsg(`Erro ao conectar: ${err?.message ?? "desconhecido"}`);
+        },
+        onClose: () => setConnecting(false),
+      });
+      pluggyRef.current.init();
+    } catch {
+      setMsg("Não foi possível carregar o widget da Pluggy.");
+      setConnecting(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!confirmDelete) return;
+    try {
+      await api.delete(`/bank-accounts/${confirmDelete.id}`);
+      setMsg("Conta removida.");
+      await load();
+    } catch {
+      setMsg("Erro ao remover conta.");
+    } finally {
+      setConfirmDelete(null);
+    }
+  };
 
   const handleSyncAccount = async (id) => {
     setSyncingId(id);
@@ -101,6 +166,16 @@ export default function BankAccountsPage() {
         onConfirm={handleConfirmMatchAction}
       />
 
+      <ConfirmModal
+        open={confirmDelete !== null}
+        title={`Remover "${confirmDelete?.name}"?`}
+        description="A conta e suas faturas/transações vinculadas deixarão de ser sincronizadas."
+        confirmLabel="Remover"
+        variant="danger"
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={handleDeleteAccount}
+      />
+
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-6 md:px-8 md:py-8">
         {/* Header */}
         <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -108,15 +183,25 @@ export default function BankAccountsPage() {
             <p className="font-display text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">Open Finance Integrations</p>
             <h1 className="mt-1 font-display text-2xl md:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Contas Bancárias</h1>
           </div>
-          <button
-            type="button"
-            onClick={load}
-            disabled={loading}
-            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-          >
-            <IconRefresh className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Atualizar Conexões
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={load}
+              disabled={loading}
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <IconRefresh className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              Atualizar Conexões
+            </button>
+            <button
+              type="button"
+              onClick={handleConnect}
+              disabled={connecting}
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {connecting ? "Aguardando..." : "+ Conectar banco"}
+            </button>
+          </div>
         </header>
 
         {msg && <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{msg}</p>}
@@ -179,6 +264,14 @@ export default function BankAccountsPage() {
                       className="rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
                     >
                       {isSyncing ? "Sincronizando..." : "Sincronizar"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(acc)}
+                      title="Remover conta"
+                      className="rounded-xl px-3 py-1.5 text-xs font-bold text-rose-500 transition hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                    >
+                      Remover
                     </button>
                   </div>
                 </Card>

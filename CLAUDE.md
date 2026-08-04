@@ -145,7 +145,7 @@ SPA roteada com **react-router** (`BrowserRouter`).
 | `CategoryRule` | Regra de categorização por keyword (armazenada em UPPERCASE). `user_id` obrigatório |
 | `Budget` | Orçamento mensal por categoria. `UniqueConstraint(user_id, category_id, month, year)` |
 | `BankAccount` | Conta bancária conectada via Pluggy (`external_id` = itemId). `user_id` obrigatório |
-| `CreditCardBill` | Fatura de cartão sincronizada da Pluggy Bills API. `UniqueConstraint(user_id, external_id)`; `payable_id` liga à conta a pagar gerada automaticamente |
+| `CreditCardBill` | Fatura de cartão. `UniqueConstraint(user_id, external_id)`; `payable_id` liga à conta a pagar gerada automaticamente. `status` distingue `CLOSED` (oficial, da Bills API) de `OPEN` (ciclo corrente reconstruído das transações — não gera `Payable`) |
 | `PushSubscription` | Subscription VAPID para push notifications. `user_id` obrigatório; `endpoint` continua unique global (é por device) |
 
 ### Lógica de Negócio Crítica
@@ -161,6 +161,18 @@ SPA roteada com **react-router** (`BrowserRouter`).
 **`upsert_bill` (bill_service):** upsert de `CreditCardBill` por `(user_id, external_id)`; gera um `Payable` na primeira sincronização e atualiza valor/vencimento nas seguintes **só se o payable ainda estiver PENDING** (nunca sobrescreve valor/vencimento de um já pago). O **título** é exceção: é recalculado sempre, inclusive em payable pago, porque é só rótulo — payables criados antes de `card_name` ser gravado ficaram como `Fatura {nome da conexão}` e, com o MeuPluggy, dois cartões do mesmo mês viravam títulos idênticos.
 
 **`is_in_payable_window` (bill_service):** o `Payable` só é **criado** se o vencimento da fatura cair no mês atual ou no seguinte. Motivo: a Pluggy devolve o histórico inteiro do cartão e, em alguns bancos, também faturas **projetadas** de parcelamento — um cartão do Inter veio com 48 faturas, a mais distante vencendo ~1 ano à frente. Sem a janela, fatura antiga não conciliada fica `PENDING` pra sempre (aparece como "vencida" que não se deve) e projeção futura polui meses à frente com valor que ainda vai mudar. Fora da janela a fatura **continua salva** como `CreditCardBill` — o histórico segue disponível para análise (`detect_recurring_candidates`, comparação de categorias), só não vira obrigação a pagar. A janela filtra apenas a criação: payable que já existe continua sendo mantido em sincronia.
+
+**Fatura em aberto (`open_bill_service` + `CreditCardBill.status`):** a Bills API só publica a fatura **depois** do fechamento, e o atraso varia por banco (Nubank e Itaú só expuseram entre 0 e 7 dias antes do vencimento; o Inter projeta com quase um ano de antecedência). No intervalo o dashboard ficava sem nenhuma informação da fatura corrente, então o sync reconstrói o ciclo aberto a partir das transações e salva como `CreditCardBill` com `status=OPEN`. Quando a fatura oficial chega, o **mesmo registro** vira `CLOSED` (o lookup por `(pluggy_account_id, mês)` de `upsert_bill` reaproveita a linha, sem duplicar). **Só `CLOSED` gera `Payable`** — fatura aberta muda a cada compra.
+
+Fatos verificados contra a API (2026-08-04, valores reais conferidos pelo dono):
+
+- **`account.balance` não serve como fatura.** É o limite consumido e a semântica varia: no Nubank ele soma o ciclo seguinte e as parcelas ainda não cobradas (R$ 787,16 contra R$ 588,37 de fatura real); na Luiza coincide com a fatura. Foi o que a tela do meu.pluggy.ai mostrava.
+- **`creditCardMetadata.billForecastDate`** (ex: `"2026-08"`) é a fonte mais confiável de qual competência a pendência vai cair — mas o Itaú rotula pelo **mês da compra**, mandando lançamentos de 15–25/07 como `2026-07` com a fatura de julho já paga; pendência sem `billId` cuja competência já fechou rolou para o ciclo seguinte.
+- **Parcelamento vem em dois formatos incompatíveis.** O Nubank só emite a parcela do ciclo corrente (as futuras precisam ser projetadas); Itaú/Luiza já emitem todas as parcelas futuras como pendências **datadas no vencimento** em que serão cobradas — projetar nesse caso conta em dobro, e a mesma parcela ainda reaparece depois de faturada. Projetar a partir de cada parcela conhecida em vez da mais recente triplica o valor.
+- **Pagamento de fatura nem sempre cai na categoria certa:** `"PAGAMENTO COM SALDO"` (Itaú/Luiza) vem como `Transfers`, mesma categoria de créditos legítimos que abatem a fatura (`"Encerramento de dívida"`). Detecção usa categoria **e** descrição. O pagamento fica registrado na fatura **seguinte** — somá-lo zeraria o ciclo novo.
+- Compras em moeda estrangeira exigem `amountInAccountCurrency` (o `amount` vem em USD).
+
+Precisão medida: Nubank **exato** (R$ 588,37), Luiza +11% (anuidade que é estornada por um crédito mensal), Itaú −6,4% (cartão em refinanciamento — encargos de rotativo só são calculados pelo banco no fechamento, nenhuma soma de transações os antecipa).
 
 **Tipo da transação vem do campo `type` da Pluggy, nunca do sinal do valor** (`_transaction_type` em `bank_sync_service`). O sinal **não** é consistente entre tipos de conta: em conta corrente a saída vem negativa, mas em **cartão de crédito a compra vem positiva** (`+15.99 type=DEBIT ANUIDADE`, verificado na API). Inferir pelo sinal marcava toda compra de cartão como receita — nos dados reais do dono, mais da metade das transações ficou invertida (1343 INCOME / 683 EXPENSE, quando a Pluggy reporta 1584 DEBIT / 439 CREDIT). Sem `type` (extrato CSV), cai no sinal, que é correto para conta corrente.
 

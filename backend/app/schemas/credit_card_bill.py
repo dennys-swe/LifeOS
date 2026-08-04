@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from app.models.credit_card_bill import CreditCardBillStatus
+
 
 class CreditCardBillResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -20,6 +22,7 @@ class CreditCardBillResponse(BaseModel):
     minimum_payment_amount: Optional[Decimal]
     allows_installments: Optional[bool]
     payable_id: Optional[UUID]
+    status: CreditCardBillStatus
 
 
 class CreditCardBillUpdate(BaseModel):

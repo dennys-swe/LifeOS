@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from app.models.bank_account import BankAccount
-from app.models.credit_card_bill import CreditCardBill
+from app.models.credit_card_bill import CreditCardBill, CreditCardBillStatus
 from app.models.payable import Payable, PayableStatus
 from app.services import bill_service
 
@@ -297,9 +297,12 @@ def test_list_bills_filters_by_month_and_user(db_session, user, other_user):
 
 def test_credit_card_bills_endpoint(client, db_session, user):
     acc = _make_account(db_session, user)
+    # O payload padrão vence no mês seguinte ao de hoje; fixar "8/2026" no
+    # filtro fazia o teste passar só enquanto durasse aquele mês.
+    due = _in_window(10, months_ahead=1)
     bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload())
 
-    response = client.get("/credit-card-bills?month=8&year=2026")
+    response = client.get(f"/credit-card-bills?month={due.month}&year={due.year}")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 1
@@ -333,8 +336,10 @@ def test_sync_account_imports_bills_for_credit_accounts(db_session, user):
 
     assert result["bills_synced"] == 1
     bills = db_session.query(CreditCardBill).all()
-    assert len(bills) == 1
-    assert bills[0].payable_id is not None
+    # Além da fatura fechada, o sync reconstrói o ciclo seguinte ainda em aberto.
+    closed = [b for b in bills if b.status == CreditCardBillStatus.CLOSED]
+    assert len(closed) == 1
+    assert closed[0].payable_id is not None
 
 
 def test_update_card_alias_updates_all_bills_and_payables(client, db_session, user):
