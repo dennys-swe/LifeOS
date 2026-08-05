@@ -9,6 +9,7 @@ import Toast from "../components/Toast";
 import Card from "../components/ui/Card";
 import CategoryDot from "../components/ui/CategoryDot";
 import EmptyState from "../components/ui/EmptyState";
+import BillStatusBadge from "../components/ui/BillStatusBadge";
 import { useFinance } from "../context/FinanceContext";
 import { fmt } from "../lib/format";
 import RecurringPayablesPage from "./RecurringPayablesPage";
@@ -169,6 +170,16 @@ export default function PayablesPage({
     return pendingPayables.filter((item) => item.due_date < todayStr);
   }, [pendingPayables, todayStr]);
 
+  // Fatura de cartão tem natureza diferente do resto: valor vem do banco, não
+  // se edita, e some do bloco quando é paga. Misturá-la com água/energia/
+  // aluguel deixava a lista sem hierarquia nenhuma.
+  const splitBills = (items) => [
+    items.filter((i) => i.origin === "BILL"),
+    items.filter((i) => i.origin !== "BILL"),
+  ];
+  const [pendingBills, pendingOthers] = splitBills(pendingPayables);
+  const [paidBills, paidOthers] = splitBills(paidPayables);
+
   const renderList = (items) => {
     if (items.length === 0) {
       return <EmptyState className="h-auto py-8">Nenhuma conta encontrada nesta seção.</EmptyState>;
@@ -180,9 +191,16 @@ export default function PayablesPage({
       const isDueToday = item.due_date === todayStr && item.status === "PENDING";
       const isOverdue = item.status === "PENDING" && item.due_date < todayStr;
       const cat = item.category_id ? categoryMap.get(item.category_id) : null;
-      // Conta gerada pelo sistema: editar ou excluir não se sustenta, porque o
-      // próximo sync recria e sobrescreve. Dar baixa continua fazendo sentido.
-      const isAuto = item.origin === "BILL" || item.origin === "RECURRING";
+      const isBill = item.origin === "BILL";
+      const isAuto = isBill || item.origin === "RECURRING";
+      // Fatura tem valor e vencimento vindos do banco: o sync sobrescreve os
+      // dois a cada rodada, então editar não se sustenta. Recorrente é o
+      // oposto — `generate_for_month` só cria se ainda não existe e nunca
+      // sobrescreve, e água/energia mudam de valor todo mês.
+      const canEdit = !isBill;
+      // Excluir só faz sentido no que é do usuário: fatura o sync recria, e
+      // recorrente é regerada ao abrir o mês de novo.
+      const canDelete = item.origin === "MANUAL";
 
       return (
         <div
@@ -212,25 +230,18 @@ export default function PayablesPage({
                 <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
                   Vencimento: {formattedDate}
                 </span>
-                {isAuto && (
-                  <span
-                    title={
-                      item.origin === "BILL"
-                        ? "Gerada da fatura sincronizada do cartão — o sync mantém valor e vencimento em dia"
-                        : "Gerada automaticamente a partir de uma conta recorrente"
-                    }
-                    className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400"
-                  >
-                    Automática
-                  </span>
-                )}
-                {item.is_estimated && (
-                  <span
-                    title="A fatura ainda não fechou no banco; o valor muda a cada compra do ciclo"
-                    className="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400"
-                  >
-                    Valor estimado
-                  </span>
+                {isBill ? (
+                  // Mesmo rótulo do dashboard: é a mesma fatura nas duas telas.
+                  <BillStatusBadge status={item.is_estimated ? "OPEN" : "CLOSED"} />
+                ) : (
+                  isAuto && (
+                    <span
+                      title="Gerada automaticamente a partir de uma conta recorrente"
+                      className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400"
+                    >
+                      Automática
+                    </span>
+                  )
                 )}
                 {cat && (
                   <span
@@ -269,23 +280,23 @@ export default function PayablesPage({
                   Baixa
                 </button>
               )}
-              {!isAuto && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setEditingPayable(item)}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(item.id)}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-500 transition hover:bg-rose-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-rose-500/10"
-                  >
-                    Excluir
-                  </button>
-                </>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => setEditingPayable(item)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  Editar
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={() => handleDelete(item.id)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-500 transition hover:bg-rose-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-rose-500/10"
+                >
+                  Excluir
+                </button>
               )}
             </div>
           </div>
@@ -433,16 +444,68 @@ export default function PayablesPage({
             ) : (
               <>
                 {(activeFilter === FILTERS.all || activeFilter === FILTERS.pending) && (
-                  <Card className="p-6">
-                    <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">Contas Pendentes</h2>
-                    <div className="mt-4 flex flex-col gap-3">{renderList(pendingPayables)}</div>
-                  </Card>
-                )}
-                {activeFilter === FILTERS.all && (
-                  <Card className="p-6">
-                    <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">Contas Pagas</h2>
-                    <div className="mt-4 flex flex-col gap-3">{renderList(paidPayables)}</div>
-                  </Card>
+                  // Duas colunas: fatura e conta comum têm naturezas distintas
+                  // (uma o banco mantém, a outra o usuário edita), e lado a lado
+                  // dá para bater o olho nas duas sem rolar a página.
+                  <div className="grid gap-6 lg:grid-cols-2 items-start">
+                    <div className="flex flex-col gap-4">
+                      <Card className="p-6">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">Faturas de cartão</h2>
+                          <span className="font-display text-sm font-bold text-slate-500 dark:text-slate-400">
+                            {fmt(pendingBills.reduce((s, p) => s + Number(p.amount), 0))}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                          Sincronizadas do banco — valor e vencimento são mantidos automaticamente
+                        </p>
+                        <div className="mt-4 flex flex-col gap-3">{renderList(pendingBills)}</div>
+
+                        {activeFilter === FILTERS.all && paidBills.length > 0 && (
+                          <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800/60">
+                            <div className="flex items-baseline justify-between gap-3">
+                              <p className="font-display text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                                Pagas ({paidBills.length})
+                              </p>
+                              <span className="font-display text-xs font-bold text-slate-400 dark:text-slate-500">
+                                {fmt(paidBills.reduce((s, p) => s + Number(p.amount), 0))}
+                              </span>
+                            </div>
+                            <div className="mt-3 flex flex-col gap-3">{renderList(paidBills)}</div>
+                          </div>
+                        )}
+                      </Card>
+                    </div>
+
+                    <div className="flex flex-col gap-4">
+                      <Card className="p-6">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">Outras contas</h2>
+                          <span className="font-display text-sm font-bold text-slate-500 dark:text-slate-400">
+                            {fmt(pendingOthers.reduce((s, p) => s + Number(p.amount), 0))}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                          Contas de valor variável (água, energia) podem ser editadas a cada mês
+                        </p>
+                        <div className="mt-4 flex flex-col gap-3">{renderList(pendingOthers)}</div>
+
+                        {activeFilter === FILTERS.all && paidOthers.length > 0 && (
+                          <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800/60">
+                            <div className="flex items-baseline justify-between gap-3">
+                              <p className="font-display text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                                Pagas ({paidOthers.length})
+                              </p>
+                              <span className="font-display text-xs font-bold text-slate-400 dark:text-slate-500">
+                                {fmt(paidOthers.reduce((s, p) => s + Number(p.amount), 0))}
+                              </span>
+                            </div>
+                            <div className="mt-3 flex flex-col gap-3">{renderList(paidOthers)}</div>
+                          </div>
+                        )}
+                      </Card>
+                    </div>
+                  </div>
                 )}
               </>
             )}

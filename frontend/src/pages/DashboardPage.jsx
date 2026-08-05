@@ -8,6 +8,7 @@ import MonthNavigator from "../components/MonthNavigator";
 import Card, { CardHeader } from "../components/ui/Card";
 import DeltaBadge from "../components/ui/DeltaBadge";
 import EmptyState from "../components/ui/EmptyState";
+import BillStatusBadge from "../components/ui/BillStatusBadge";
 import Skeleton, { SkeletonGrid } from "../components/ui/Skeleton";
 import { useFinance } from "../context/FinanceContext";
 import { fmt } from "../lib/format";
@@ -83,26 +84,6 @@ function CardColorPicker({ current, onPick, onClose }) {
         })}
       </div>
     </>
-  );
-}
-
-function BillStatusBadge({ status }) {
-  const isOpen = status === "OPEN";
-  return (
-    <span
-      title={
-        isOpen
-          ? "O banco ainda não fechou esta fatura — valor reconstruído dos lançamentos do ciclo e sujeito a mudar"
-          : "Fatura fechada pelo banco — valor definitivo"
-      }
-      className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-        isOpen
-          ? "border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-          : "border border-slate-400/30 bg-slate-500/10 text-slate-600 dark:text-slate-400"
-      }`}
-    >
-      {isOpen ? "Aberta" : "Fechada"}
-    </span>
   );
 }
 
