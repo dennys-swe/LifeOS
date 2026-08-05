@@ -29,7 +29,13 @@ def create_category_rule(
     db: Session = Depends(get_db),
     user: User = Depends(current_active_user),
 ):
-    return category_rule_service.create_rule(db, user.id, payload)
+    rule = category_rule_service.create_rule(db, user.id, payload)
+    # A regra vale desde já para o histórico: o sync pula transação existente,
+    # então sem isso ela só afetaria importações futuras.
+    applied = category_rule_service.apply_rule_to_existing(db, user.id, rule)
+    return CategoryRuleResponse.model_validate(rule).model_copy(
+        update={"applied_count": applied}
+    )
 
 
 @router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)

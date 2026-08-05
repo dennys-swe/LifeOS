@@ -15,3 +15,7 @@ class CategoryRuleResponse(CategoryRuleCreate):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    # Quantos lançamentos já existentes a regra reclassificou ao ser criada.
+    # Sem devolver isso, a tela não teria como dizer que a regra fez efeito —
+    # o usuário salvaria a regra e o extrato pareceria intacto.
+    applied_count: int = 0

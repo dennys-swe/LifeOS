@@ -141,11 +141,11 @@ SPA roteada com **react-router** (`BrowserRouter`).
 | `Payable` | Conta a pagar. `user_id` obrigatório. FKs nullable: `recurring_payable_id` (ondelete=SET NULL), `transaction_id` (ondelete=SET NULL) |
 | `RecurringPayable` | Template de recorrência (title, amount, day_of_month, active, start_date/end_date). `user_id` obrigatório |
 | `Transaction` | Transação de extrato bancário. `user_id` obrigatório; índice composto `(user_id, source)` para dedup do sync Pluggy. `is_transfer` exclui dos totais de gasto; `external_category` guarda a categoria crua da Pluggy |
-| `Category` | Categoria com cor (color_hex), por usuário. `UniqueConstraint(user_id, name)`. Seed de 6 categorias padrão no registro |
+| `Category` | Categoria com cor (color_hex) e `kind` (`EXPENSE`/`INCOME`), por usuário. `UniqueConstraint(user_id, name)`. Seed de 16 categorias padrão no registro (12 de gasto + 4 de receita) |
 | `CategoryRule` | Regra de categorização por keyword (armazenada em UPPERCASE). `user_id` obrigatório |
 | `Budget` | Orçamento mensal por categoria. `UniqueConstraint(user_id, category_id, month, year)` |
 | `BankAccount` | Conta bancária conectada via Pluggy (`external_id` = itemId). `user_id` obrigatório |
-| `CreditCardBill` | Fatura de cartão. `UniqueConstraint(user_id, external_id)`; `payable_id` liga à conta a pagar gerada automaticamente. `status` distingue `CLOSED` (oficial, da Bills API) de `OPEN` (ciclo corrente reconstruído das transações — não gera `Payable`) |
+| `CreditCardBill` | Fatura de cartão. `UniqueConstraint(user_id, external_id)`; `payable_id` liga à conta a pagar gerada automaticamente. `status` distingue `CLOSED` (oficial, da Bills API) de `OPEN` (ciclo corrente reconstruído das transações — não gera `Payable`). `custom_card_name`/`custom_color_hex` são do **cartão**, propagados a todas as faturas do mesmo `pluggy_account_id` |
 | `PushSubscription` | Subscription VAPID para push notifications. `user_id` obrigatório; `endpoint` continua unique global (é por device) |
 
 ### Lógica de Negócio Crítica
@@ -178,6 +178,15 @@ Precisão medida: Nubank **exato** (R$ 588,37), Luiza +11% (anuidade que é esto
 
 **Transferência (`Transaction.is_transfer`)** marca dinheiro que só muda de lugar: quitação de fatura, transferência entre as próprias contas (`Same person transfer`), aporte em investimento. `summary_service` **exclui** transferências dos totais e do por-categoria — senão a mesma grana conta duas vezes (a compra no cartão **e** a quitação da fatura). Decisões explícitas: PIX/TED/boleto **para terceiros é gasto** (o dinheiro saiu de vez) e vai para a categoria `Transferências` — é gasto sem natureza de consumo, e deixá-lo sem categoria escondia ~21% das transações do "gastos por categoria"; aporte em investimento **não é** gasto (o dinheiro continua seu). `recurring_detection` também exclui transferências (219 `Same person transfer` dominavam as sugestões). Já a **conciliação inclui** a quitação de fatura mesmo sendo `type=CREDIT` do lado do cartão (`_reconcilable`) — é a única ponta disponível quando a conta pagadora não está conectada.
 
+**A categoria da Pluggy não basta para reconhecer quitação de fatura.** `is_transfer` também casa a **descrição** (`pagamento de fatura` / `fatura paga`): nos dados reais do dono, 13 quitações vieram com `category="Transfers"` genérico em vez de `Credit card payment`, e por isso contavam como gasto — R$ 2.714,13 de contagem dupla, 6,4% do gasto de jun+jul/2026.
+
+**Categoria tem tipo (`Category.kind`: `EXPENSE`/`INCOME`).** Antes não existia nenhuma categoria de receita, então dinheiro recebido caía em `Transferências` — categoria criada para PIX **enviado** (202 lançamentos, R$ 58.542,65). Consequências no código:
+
+- `category_name_for(pluggy_category, is_income)` é **direcional**: a mesma categoria da Pluggy significa coisas opostas conforme o dinheiro entra ou sai (`Transfer - PIX` enviado é gasto, recebido é receita). Entrada que só casa com categoria de despesa vai para `Outras receitas` — a Pluggy classifica pelo **estabelecimento**, não pela direção, então repasse e estorno são indistinguíveis ali (foi assim que a renda semanal da Uber, `Taxi and ride-hailing`, foi parar em `Transporte`).
+- `_category_for_direction` (bank_sync_service) é a trava final: regra de keyword não sabe direção, e uma regra `UBER -> Renda extra` casaria também com uma corrida paga pelo usuário. Categoria cujo `kind` não bate com o tipo da transação é **descartada** — sem categoria é melhor que categoria errada, porque fica visível e corrigível.
+
+**Regra de categorização vale retroativamente** (`apply_rule_to_existing`, chamada no `POST /category-rules`). O sync deduplica pelo id da Pluggy e pula transação existente, então sem isso criar uma regra não mudava nada na tela e parecia quebrado. A regra sobrescreve categoria anterior (é a fonte da verdade), mas nunca cruza a direção do dinheiro. O filtro usa `is_distinct_from` — `!=` deixaria de fora justamente os sem categoria, porque `NULL != valor` é `NULL` em SQL. O endpoint devolve `applied_count` para a tela poder dizer quantos lançamentos mudaram.
+
 **`detect_recurring_candidates` (recurring_detection_service):** agrupa transações EXPENSE por descrição normalizada (maiúsculas, sem dígitos); exige ≥3 meses distintos, valor dentro de ±10% da mediana e dia do mês com desvio ≤3 do modo. Exclui títulos que já têm `RecurringPayable` cadastrado.
 
 ### Endpoints da API
@@ -201,6 +210,7 @@ Precisão medida: Nubank **exato** (R$ 588,37), Luiza +11% (anuidade que é esto
 | `POST` | `/recurring-payables/generate?month=&year=` | Gera payables do mês a partir dos recorrentes |
 | `POST` | `/transactions/upload` | Upload CSV; retorna `{transactions, suggestions}` (já sem os auto-reconciliados) |
 | `GET/POST/DELETE` | `/transactions` | CRUD de transações |
+| `PATCH` | `/transactions/{id}` | Altera `category_id` e/ou `is_transfer` (valida que a categoria é do usuário) |
 | `GET/POST` | `/categories` | Lista/cria categorias do usuário |
 | `GET/POST/DELETE` | `/category-rules` | CRUD de regras de categorização |
 | `GET` | `/summary?month=&year=` | Totais + by_category + budget_used_pct (income/expenses/balance mantidos por compatibilidade, não usados no dashboard) |

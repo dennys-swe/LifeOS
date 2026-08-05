@@ -134,7 +134,7 @@ function NotificationsTab() {
 const RULE_INITIAL = { keyword: "", category_id: "", priority: 0 };
 
 function RulesTab() {
-  const { categories } = useFinance();
+  const { categories, refresh } = useFinance();
   const [rules, setRules] = useState([]);
   const [form, setForm] = useState(RULE_INITIAL);
   const [showForm, setShowForm] = useState(false);
@@ -150,11 +150,26 @@ function RulesTab() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.category_id) { setMsg("Selecione uma categoria."); return; }
-    await api.post("/category-rules", { ...form, priority: Number(form.priority) }).catch(() => null);
+    const res = await api
+      .post("/category-rules", { ...form, priority: Number(form.priority) })
+      .catch(() => null);
     setForm(RULE_INITIAL);
     setShowForm(false);
-    setMsg("Regra criada com sucesso.");
+    if (res === null) {
+      setMsg("Não foi possível criar a regra.");
+    } else {
+      // Sem informar quantos lançamentos mudaram, a regra parece não ter feito
+      // nada: o efeito dela está no extrato, não nesta tela.
+      const n = res.data?.applied_count ?? 0;
+      setMsg(
+        n > 0
+          ? `Regra criada — ${n} ${n === 1 ? "lançamento existente foi reclassificado" : "lançamentos existentes foram reclassificados"}.`
+          : "Regra criada. Nenhum lançamento existente casou com ela; vale para as próximas sincronizações."
+      );
+    }
     load();
+    // O gasto por categoria muda quando lançamentos trocam de categoria.
+    refresh?.();
   };
 
   const handleDelete = async (id) => {
@@ -204,7 +219,19 @@ function RulesTab() {
                 className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               >
                 <option value="">Selecionar...</option>
-                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {/* Agrupado por tipo: a regra só vale para lançamentos da mesma
+                    direção, então escolher "Renda extra" para uma despesa não
+                    teria efeito nenhum e pareceria bug. */}
+                <optgroup label="Despesa">
+                  {categories
+                    .filter((c) => !c.kind || c.kind === "EXPENSE")
+                    .map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </optgroup>
+                <optgroup label="Receita">
+                  {categories
+                    .filter((c) => c.kind === "INCOME")
+                    .map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </optgroup>
               </select>
             </label>
             <label className="flex flex-col gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
