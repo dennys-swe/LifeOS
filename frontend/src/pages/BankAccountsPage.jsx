@@ -52,7 +52,7 @@ export default function BankAccountsPage() {
     try {
       const [accRes, sugRes] = await Promise.all([
         api.get("/bank-accounts").catch(() => ({ data: [] })),
-        api.get("/reconciliation/suggestions").catch(() => ({ data: [] })),
+        api.get("/bank-accounts/reconciliation-suggestions").catch(() => ({ data: [] })),
       ]);
       setAccounts(accRes.data ?? []);
       setSuggestions(sugRes.data ?? []);
@@ -141,10 +141,11 @@ export default function BankAccountsPage() {
   const handleConfirmMatchAction = async () => {
     if (!confirmMatch) return;
     try {
-      await api.post("/reconciliation/confirm", {
-        payable_id: confirmMatch.payable_id,
-        transaction_id: confirmMatch.transaction_id,
-      });
+      await api.patch(
+        `/payables/${confirmMatch.payable_id}/reconcile`,
+        null,
+        { params: { transaction_id: confirmMatch.transaction_id } }
+      );
       setMsg("Conciliação confirmada!");
       await load();
     } catch {
@@ -309,13 +310,15 @@ export default function BankAccountsPage() {
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
-                        Correspondente à transação: <strong className="text-slate-700 dark:text-slate-300">{sug.transaction_description}</strong> em {sug.transaction_date}
+                        Correspondente à transação:{" "}
+                        <strong className="text-slate-700 dark:text-slate-300">{sug.transaction_description}</strong>{" "}
+                        de {fmt(Number(sug.transaction_amount))}
                       </p>
                     </div>
 
                     <div className="flex items-center justify-between md:justify-end gap-3">
                       <span className="font-display text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                        {fmt(Number(sug.amount))}
+                        {fmt(Number(sug.payable_amount))}
                       </span>
                       <button
                         type="button"

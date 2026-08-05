@@ -5,6 +5,8 @@ import Card from "../components/ui/Card";
 import EmptyState from "../components/ui/EmptyState";
 import { useFinance } from "../context/FinanceContext";
 
+const DISMISSED_KEY = "lifeos:recurring-suggestions-dismissed";
+
 const firstOfCurrentMonth = () => {
   return new Date().toLocaleDateString("en-CA").slice(0, 7) + "-01";
 };
@@ -32,7 +34,16 @@ export default function RecurringPayablesPage({ month, year, embedded = false })
   const [messageType, setMessageType] = useState("success");
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
-  const [dismissed, setDismissed] = useState(new Set());
+  // Persistido no navegador: sem isso a sugestão dispensada voltava a cada
+  // recarregamento, e a lista nunca ficava limpa. Não é por usuário no
+  // servidor — é preferência de exibição, não dado financeiro.
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "[]"));
+    } catch {
+      return new Set();
+    }
+  });
   const [acceptingTitle, setAcceptingTitle] = useState(null);
 
   const setMsg = (text, type = "success") => { setMessage(text); setMessageType(type); };
@@ -81,7 +92,15 @@ export default function RecurringPayablesPage({ month, year, embedded = false })
   };
 
   const handleDismissSuggestion = (title) => {
-    setDismissed((prev) => new Set(prev).add(title));
+    setDismissed((prev) => {
+      const next = new Set(prev).add(title);
+      try {
+        localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next]));
+      } catch {
+        // Modo privado/quota cheia: a dispensa vale só nesta sessão.
+      }
+      return next;
+    });
   };
 
   const visibleSuggestions = suggestions.filter((s) => !dismissed.has(s.title));
@@ -185,6 +204,10 @@ export default function RecurringPayablesPage({ month, year, embedded = false })
   const labelCls = "flex flex-col text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400";
 
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
+  // Recorrente é sempre despesa (aluguel, água, energia). Sem filtrar, a lista
+  // oferecia "Salário"/"Renda extra" e dava para criar um recorrente com
+  // categoria de receita — que o resto do app trata como entrada.
+  const expenseCategories = categories.filter((c) => !c.kind || c.kind === "EXPENSE");
 
   const content = (
     <div className="flex flex-col gap-6">
@@ -251,7 +274,7 @@ export default function RecurringPayablesPage({ month, year, embedded = false })
                 Categoria
                 <select value={form.category_id} onChange={(e) => setForm((p) => ({ ...p, category_id: e.target.value }))} className={inputCls}>
                   <option value="">Sem categoria</option>
-                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {expenseCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </label>
               <label className={labelCls}>
@@ -345,7 +368,7 @@ export default function RecurringPayablesPage({ month, year, embedded = false })
                         Categoria
                         <select value={editForm.category_id} onChange={(e) => setEditForm((p) => ({ ...p, category_id: e.target.value }))} className={inputCls}>
                           <option value="">Sem categoria</option>
-                          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          {expenseCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                       </label>
                       <label className={labelCls}>

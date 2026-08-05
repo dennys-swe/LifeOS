@@ -113,7 +113,7 @@ Fatos verificados empiricamente contra a API (2026-07-29, item real do dono):
 
 SPA roteada com **react-router** (`BrowserRouter`).
 
-- `App.jsx` — árvore de rotas: `/login`, `/register` (públicas) e um grupo protegido por `ProtectedLayout` (`/`, `/payables`, `/transactions`, `/banks`, `/settings`, `/upload`).
+- `App.jsx` — árvore de rotas: `/login`, `/register` (públicas) e um grupo protegido por `ProtectedLayout` (`/`, `/categoria/:id`, `/payables`, `/transactions`, `/banks`, `/settings`).
 - `components/ProtectedLayout.jsx` — gate de auth (`useAuth()`; redireciona para `/login` se não autenticado) **acima** do `FinanceProvider`. Também é dono do estado `selectedMonth/Year`/`payablesFilter`, repassado às páginas via `useOutletContext()`.
 - `context/AuthContext.jsx` — `login`/`register`/`logout`, token em `localStorage`. Login é form-encoded (`username`/`password`) — peculiaridade do fastapi-users, não JSON.
 - `services/api.js` — axios singleton com interceptor de request (injeta `Authorization: Bearer`) e de response (401 → limpa token e redireciona para `/login`).
@@ -121,7 +121,7 @@ SPA roteada com **react-router** (`BrowserRouter`).
 - `pages/DashboardPage.jsx` — dashboard focado em **contas, faturas e gastos** (StatCards "A vencer", "Vencidas", "Faturas do mês", "Pago no mês"; gastos por categoria; faturas de cartão; orçamento). Não mostra mais fluxo de caixa (entrou/saiu) — esse dado ainda existe no backend (`SummaryResponse.total_income/total_expenses/balance`) por compatibilidade, mas o frontend não consome mais.
 - `pages/PayablesPage.jsx` — lista de contas com filtros, exclusão otimista com undo via toast; embute `RecurringPayablesPage` como aba "Recorrentes".
 - `pages/RecurringPayablesPage.jsx` — CRUD de recorrentes + botão "Gerar para este mês" + bloco de sugestões de recorrentes detectadas automaticamente (`GET /recurring-payables/suggestions`), com aceitar/descartar (descarte é só local, não persiste).
-- `pages/UploadPage.jsx` — upload de extrato CSV + UI de revisão de sugestões de conciliação (as de confidence 1.0 já vêm auto-confirmadas pelo backend e não aparecem aqui).
+- `pages/CategoryDetailPage.jsx` — drill-down de uma categoria: lista as transações que compõem o total do card do dashboard (inclui "Sem categoria" via slug).
 - `pages/BankAccountsPage.jsx` — fluxo Pluggy Connect (widget via CDN) + lista de contas conectadas + sugestões de conciliação (as faturas de cartão são listadas no `DashboardPage`, não aqui). Ao conectar, envia só `external_id` (o backend deriva o nome); clicar no nome da conta habilita rename inline (`PATCH`, otimista).
 - `pages/SettingsPage.jsx` — abas Regras / Categorias / **Notificações** (toggle que assina push via `Notification.requestPermission()` + `pushManager.subscribe()`, usando a chave de `GET /push-subscriptions/vapid-public-key`).
 - `components/FabModal.jsx` — FAB que abre modal para criar payable ou transação.
@@ -156,7 +156,7 @@ SPA roteada com **react-router** (`BrowserRouter`).
 
 **`suggest_reconciliation` (reconciliation_service):** para cada transação EXPENSE do usuário, busca payables PENDING do mesmo usuário com `amount` dentro de 5% e `due_date` dentro de ±7 dias. Confidence scoring: 1.0 (exato), 0.8 (valor exato, data ±7d), 0.6 (valor ±5%, data exata), 0.5 (ambos tolerantes).
 
-**`auto_reconcile_confident_matches` (reconciliation_service):** confirma automaticamente sugestões com confidence 1.0 **somente quando o match é único** (nem o payable nem a transação aparecem em mais de uma sugestão exata) — evita reconciliar errado em caso de empate. Rodado ao fim do sync Pluggy e do upload de CSV.
+**`auto_reconcile_confident_matches` (reconciliation_service):** confirma automaticamente sugestões com confidence 1.0 **somente quando o match é único** (nem o payable nem a transação aparecem em mais de uma sugestão exata) — evita reconciliar errado em caso de empate. Rodado ao fim do sync Pluggy. As sugestões que sobram aparecem em `/banks`, para confirmação manual.
 
 **`upsert_bill` (bill_service):** upsert de `CreditCardBill` por `(user_id, external_id)`; gera um `Payable` na primeira sincronização e atualiza valor/vencimento nas seguintes **só se o payable ainda estiver PENDING** (nunca sobrescreve valor/vencimento de um já pago). O **título** é exceção: é recalculado sempre, inclusive em payable pago, porque é só rótulo — payables criados antes de `card_name` ser gravado ficaram como `Fatura {nome da conexão}` e, com o MeuPluggy, dois cartões do mesmo mês viravam títulos idênticos.
 
@@ -176,7 +176,7 @@ Fatos verificados contra a API (2026-08-04, valores reais conferidos pelo dono):
 
 Precisão medida: Nubank **exato** (R$ 588,37), Luiza +11% (anuidade que é estornada por um crédito mensal), Itaú −6,4% (cartão em refinanciamento — encargos de rotativo só são calculados pelo banco no fechamento, nenhuma soma de transações os antecipa).
 
-**Tipo da transação vem do campo `type` da Pluggy, nunca do sinal do valor** (`_transaction_type` em `bank_sync_service`). O sinal **não** é consistente entre tipos de conta: em conta corrente a saída vem negativa, mas em **cartão de crédito a compra vem positiva** (`+15.99 type=DEBIT ANUIDADE`, verificado na API). Inferir pelo sinal marcava toda compra de cartão como receita — nos dados reais do dono, mais da metade das transações ficou invertida (1343 INCOME / 683 EXPENSE, quando a Pluggy reporta 1584 DEBIT / 439 CREDIT). Sem `type` (extrato CSV), cai no sinal, que é correto para conta corrente.
+**Tipo da transação vem do campo `type` da Pluggy, nunca do sinal do valor** (`_transaction_type` em `bank_sync_service`). O sinal **não** é consistente entre tipos de conta: em conta corrente a saída vem negativa, mas em **cartão de crédito a compra vem positiva** (`+15.99 type=DEBIT ANUIDADE`, verificado na API). Inferir pelo sinal marcava toda compra de cartão como receita — nos dados reais do dono, mais da metade das transações ficou invertida (1343 INCOME / 683 EXPENSE, quando a Pluggy reporta 1584 DEBIT / 439 CREDIT). Sem `type`, cai no sinal, que é correto para conta corrente.
 
 **Transferência (`Transaction.is_transfer`)** marca dinheiro que só muda de lugar: quitação de fatura, transferência entre as próprias contas (`Same person transfer`), aporte em investimento. `summary_service` **exclui** transferências dos totais e do por-categoria — senão a mesma grana conta duas vezes (a compra no cartão **e** a quitação da fatura). Decisões explícitas: PIX/TED/boleto **para terceiros é gasto** (o dinheiro saiu de vez) e vai para a categoria `Transferências` — é gasto sem natureza de consumo, e deixá-lo sem categoria escondia ~21% das transações do "gastos por categoria"; aporte em investimento **não é** gasto (o dinheiro continua seu). `recurring_detection` também exclui transferências (219 `Same person transfer` dominavam as sugestões). Já a **conciliação inclui** a quitação de fatura mesmo sendo `type=CREDIT` do lado do cartão (`_reconcilable`) — é a única ponta disponível quando a conta pagadora não está conectada.
 
@@ -210,7 +210,6 @@ Precisão medida: Nubank **exato** (R$ 588,37), Luiza +11% (anuidade que é esto
 | `GET/POST/DELETE` | `/recurring-payables` | CRUD de recorrentes |
 | `GET` | `/recurring-payables/suggestions` | Sugestões de recorrentes detectadas no extrato |
 | `POST` | `/recurring-payables/generate?month=&year=` | Gera payables do mês a partir dos recorrentes |
-| `POST` | `/transactions/upload` | Upload CSV; retorna `{transactions, suggestions}` (já sem os auto-reconciliados) |
 | `GET/POST/DELETE` | `/transactions` | CRUD de transações |
 | `PATCH` | `/transactions/{id}` | Altera `category_id` e/ou `is_transfer` (valida que a categoria é do usuário) |
 | `GET/POST` | `/categories` | Lista/cria categorias do usuário |
@@ -219,6 +218,7 @@ Precisão medida: Nubank **exato** (R$ 588,37), Luiza +11% (anuidade que é esto
 | `GET/POST/DELETE` | `/budgets?month=&year=` | CRUD de orçamentos |
 | `GET/POST/DELETE` | `/bank-accounts` | CRUD de contas bancárias conectadas via Pluggy. No POST, `name`/`bank_name` são opcionais — omitidos, o backend deriva via `describe_item` |
 | `PATCH` | `/bank-accounts/{id}` | Renomeia a conta (`name`/`bank_name`) |
+| `GET` | `/bank-accounts/reconciliation-suggestions` | Sugestões pendentes de conciliação (consumidas em `/banks`) |
 | `POST` | `/bank-accounts/connect-token` | Token do widget Pluggy Connect |
 | `POST` | `/webhooks/pluggy` | Webhook da Pluggy (público) — dispara sync do item afetado |
 | `POST` | `/bank-accounts/{id}/sync` | Sync de transações + faturas + auto-reconciliação |
