@@ -66,7 +66,7 @@ Camadas FastAPI seguindo o padrão: **Router → Service → SQLAlchemy ORM → 
 - `app/models/` — ORM SQLAlchemy. **Toda tabela de dados tem `user_id` (FK `users.id`, ondelete=CASCADE)**, exceto `users`.
 - `app/schemas/` — schemas Pydantic v2 (usar `model_dump`, `ConfigDict`, `from_attributes=True`).
 - `app/core/config.py` — `Settings` (pydantic-settings), fonte única de env vars.
-- `app/core/users.py` — núcleo do fastapi-users: `SyncSQLAlchemyUserDatabase` (adapter próprio sobre a `Session` sync do projeto — **não** usa `fastapi-users-db-sqlalchemy`, que exige async), `UserManager` (semeia as 6 categorias padrão no `on_after_register`), `auth_backend` (JWT Bearer), `current_active_user` (dependency usada em todos os endpoints).
+- `app/core/users.py` — núcleo do fastapi-users: `SyncSQLAlchemyUserDatabase` (adapter próprio sobre a `Session` sync do projeto — **não** usa `fastapi-users-db-sqlalchemy`, que exige async), `UserManager` (semeia as 16 categorias padrão no `on_after_register`), `auth_backend` (JWT Bearer), `current_active_user` (dependency usada em todos os endpoints).
 - `app/db/database.py` — engine (`pool_pre_ping=True`) + session factory. SSL automático para PostgreSQL. `get_db()` é a dependency FastAPI.
 - `app/jobs/daily_sync.py` — job de sync diário (`python -m app.jobs.daily_sync`), pensado para rodar como Render Cron Job. Por usuário: sincroniza contas Pluggy, gera payables do mês a partir dos recorrentes, dispara push de contas vencendo. Também exposto via `POST /jobs/daily-sync` protegido por header `X-Cron-Secret`.
 - `alembic/versions/` — migrations em ordem cronológica.
@@ -82,7 +82,7 @@ Camadas FastAPI seguindo o padrão: **Router → Service → SQLAlchemy ORM → 
 ### Integração Pluggy (Open Finance)
 
 - `app/services/pluggy_client.py` — autentica com `PLUGGY_CLIENT_ID`/`SECRET` (credenciais da aplicação, cache de api_key em memória). O isolamento por usuário vem de `bank_accounts.user_id`, não de um campo da Pluggy (o SDK instalado não expõe `clientUserId` no `ConnectTokenRequest`).
-- `app/services/pluggy_category_map.py` — mapeia as ~61 categorias que a Pluggy atribui (`Groceries`, `Gas stations`, ...) para as 10 categorias padrão do usuário, e define quais são **transferência**. Mapa explícito de propósito: categoria nova que a Pluggy inventar fica sem categoria em vez de ser adivinhada errado, e `Transaction.external_category` guarda o valor cru pra descobrir o que completar.
+- `app/services/pluggy_category_map.py` — mapeia as categorias que a Pluggy atribui (`Groceries`, `Gas stations`, ...) para as categorias padrão do usuário — 55 de despesa e 6 do ramo Income — e define quais são **transferência**. Mapa explícito de propósito: categoria nova que a Pluggy inventar fica sem categoria em vez de ser adivinhada errado, e `Transaction.external_category` guarda o valor cru pra descobrir o que completar.
 - `app/services/bank_sync_service.sync_account` — sincroniza transações (dedup por `(user_id, source="pluggy:{tx_id}")`) e, para contas `type == "CREDIT"`, também as faturas via `bill_service`. Usa `*_without_preload_content` + `json.loads` como workaround de um bug de validação Pydantic do SDK (`CreditCardMetadata.payeeMCC`); o mesmo padrão foi replicado para `BillApi.bills_list_without_preload_content`. Ao final, roda `suggest_reconciliation` + `auto_reconcile_confident_matches` sobre as transações recém-importadas.
 - `app/services/bill_service.py` — upsert de `CreditCardBill` por `(user_id, external_id)` e geração/atualização automática do `Payable` correspondente (nunca atualiza um payable já `PAID`).
 - Faturas só existem em conexões Open Finance Regulado — falha ao buscar degrada para lista vazia (não derruba o sync de transações), mas **loga em stderr** (`[bank_sync] bills indisponíveis ...`). Se a geração automática de `Payable` de fatura parar de acontecer, esse log é o primeiro lugar a olhar.
@@ -119,12 +119,12 @@ SPA roteada com **react-router** (`BrowserRouter`).
 - `services/api.js` — axios singleton com interceptor de request (injeta `Authorization: Bearer`) e de response (401 → limpa token e redireciona para `/login`).
 - `context/FinanceContext.jsx` — estado global compartilhado. Faz 3 chamadas em paralelo (`/payables`, `/categories`, `/summary`) e expõe `payables`, `categories`, `summary`, `loading`, `refresh()`. Re-dispara quando `month`, `year` ou `refreshKey` mudam.
 - `pages/DashboardPage.jsx` — dashboard focado em **contas, faturas e gastos** (StatCards "A vencer", "Vencidas", "Faturas do mês", "Pago no mês"; gastos por categoria; faturas de cartão; orçamento). Não mostra mais fluxo de caixa (entrou/saiu) — esse dado ainda existe no backend (`SummaryResponse.total_income/total_expenses/balance`) por compatibilidade, mas o frontend não consome mais.
-- `pages/PayablesPage.jsx` — lista de contas com filtros, exclusão otimista com undo via toast; embute `RecurringPayablesPage` como aba "Recorrentes".
-- `pages/RecurringPayablesPage.jsx` — CRUD de recorrentes + botão "Gerar para este mês" + bloco de sugestões de recorrentes detectadas automaticamente (`GET /recurring-payables/suggestions`), com aceitar/descartar (descarte é só local, não persiste).
+- `pages/PayablesPage.jsx` — contas do mês em **duas colunas** (faturas de cartão à esquerda, demais contas à direita), cada uma com subtotal e as pagas separadas no rodapé. As ações seguem `origin`: fatura não oferece editar/excluir (o sync sobrescreve), recorrente só editar (é regerada ao abrir o mês). Exclusão otimista com undo via toast; embute `RecurringPayablesPage` como aba "Recorrentes".
+- `pages/RecurringPayablesPage.jsx` — CRUD de recorrentes + botão "Gerar para este mês" + bloco de sugestões de recorrentes detectadas automaticamente (`GET /recurring-payables/suggestions`), com aceitar/descartar (o descarte persiste em `localStorage` — é preferência de exibição, não dado financeiro, e por isso não acompanha o usuário entre navegadores).
 - `pages/CategoryDetailPage.jsx` — drill-down de uma categoria: lista as transações que compõem o total do card do dashboard (inclui "Sem categoria" via slug).
 - `pages/BankAccountsPage.jsx` — fluxo Pluggy Connect (widget via CDN) + lista de contas conectadas + sugestões de conciliação (as faturas de cartão são listadas no `DashboardPage`, não aqui). Ao conectar, envia só `external_id` (o backend deriva o nome); clicar no nome da conta habilita rename inline (`PATCH`, otimista).
-- `pages/SettingsPage.jsx` — abas Regras / Categorias / **Notificações** (toggle que assina push via `Notification.requestPermission()` + `pushManager.subscribe()`, usando a chave de `GET /push-subscriptions/vapid-public-key`).
-- `components/FabModal.jsx` — FAB que abre modal para criar payable ou transação.
+- `pages/SettingsPage.jsx` — abas Regras (o seletor de categoria é agrupado por Despesa/Receita, já que a regra não cruza a direção do dinheiro) / Categorias / **Notificações** (toggle que assina push via `Notification.requestPermission()` + `pushManager.subscribe()`, usando a chave de `GET /push-subscriptions/vapid-public-key`).
+- `components/FabModal.jsx` — FAB que abre modal para criar payable ou transação. A lista de categorias respeita o `kind` do lançamento, e o formulário de conta avisa que fatura de cartão de banco conectado é criada pelo sync.
 - `components/Sidebar.jsx` — nav via `NavLink`; rodapé com e-mail do usuário e logout.
 
 **Invariante de datas:** `due_date` trafega e é armazenada como string `YYYY-MM-DD`. **Nunca** construir `new Date(due_date)` — o GMT offset desloca a data um dia. Sempre usar `.split('-')`, `localeCompare` ou comparação direta de strings.
@@ -196,7 +196,7 @@ Precisão medida: Nubank **exato** (R$ 588,37), Luiza +11% (anuidade que é esto
 | Método | Path | Descrição |
 |--------|------|-----------|
 | `GET/HEAD` | `/` | Health check |
-| `POST` | `/auth/register` | Cria usuário (semeia 6 categorias padrão) |
+| `POST` | `/auth/register` | Cria usuário (semeia 16 categorias padrão: 12 de gasto + 4 de receita) |
 | `POST` | `/auth/jwt/login` | Login (form-encoded `username`/`password`) → `{access_token, token_type}` |
 | `POST` | `/auth/jwt/logout` | Logout |
 | `GET/PATCH` | `/users/me` | Perfil do usuário autenticado |

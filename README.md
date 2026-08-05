@@ -27,20 +27,25 @@ O **LifeOS** evoluiu de um gerenciador manual de checklist de contas a pagar par
 ### 🏦 Open Finance & Sincronização Bancária (Pluggy)
 - **Integração Real**: Conexão com instituições bancárias via conector **MeuPluggy** (permitindo uso pessoal sem custos de licença comercial).
 - **Extrato & Faturas**: Sincronização automática de transações de conta corrente e faturas de cartão de crédito.
+- **Fatura Aberta vs Fechada**: A Bills API só publica a fatura depois do fechamento — atraso que varia por banco. O ciclo em aberto é **reconstruído das transações** (`billForecastDate`, parcelas projetadas, conversão de moeda) e exibido com selo *Aberta*, virando *Fechada* com o valor oficial quando o banco publica.
 - **Janela de Payables**: Algoritmo que filtra e gera obrigações a pagar apenas para faturas no mês atual ou seguinte (`is_in_payable_window`), evitando poluição com projeções futuras distantes ou faturas antigas.
 
 ### 📊 Dashboard Inteligente & Insights
 - **Herói de Gasto Mensal**: Visualização do gasto total do mês com comparativo percentual (delta) em relação ao mês anterior.
 - **Faixa de Insights**: Regras automáticas (`GET /insights`) que identificam variações atípicas em categorias, maiores gastos do mês, ritmo de despesas e alertas de orçamento perto do limite ou estourado.
-- **Gráficos de Tendência & Drill-Down**: Série temporal temporal via Recharts e navegabilidade por categoria (`/categoria/:id`) para inspecionar cada transação que compõe os totais.
+- **Gráficos de Tendência & Drill-Down**: Série temporal via Recharts e navegabilidade por categoria (`/categoria/:id`) para inspecionar cada transação que compõe os totais.
+- **Personalização de Cartão**: Apelido e cor definidos por cartão (não por fatura), propagados a todas as faturas do mesmo cartão e herdados pelas próximas sincronizações.
 
 ### 🤝 Conciliação Bancária & Classificação
-- **Scoring de Confiança**: Cruzamento automático entre transações do extrato e contas a pagar pendentes (score 1.0 para valor e data exatos; tolerância de valor ±5% e data ±7 dias). Auto-conciliação automática para matches únicos exatos.
-- **Mapeamento de Categorias**: Conversão automática de ~61 categorias da Pluggy para as categorias do usuário, além de suporte a regras personalizadas por palavra-chave (*keywords*).
+- **Scoring de Confiança**: Cruzamento entre transações do extrato e contas a pagar pendentes. O **valor precisa bater exato** (score 1.0 com a data no vencimento, 0.8 dentro de ±7 dias); a antiga tolerância de ±5% comprava 4 acertos a mais em 91 casos reais e, em troca, sugeria falso positivo em quase toda linha. Auto-conciliação apenas para matches únicos exatos.
+- **Mapeamento de Categorias**: Conversão das categorias da Pluggy para as 16 categorias padrão do usuário (12 de gasto + 4 de receita). O mapeamento é **direcional**: a mesma categoria da Pluggy significa coisas opostas conforme o dinheiro entra ou sai (PIX enviado é gasto, recebido é receita).
+- **Regras por Palavra-chave**: Override do usuário sobre a classificação automática, aplicado **também ao histórico** no momento em que a regra é criada — não só às importações futuras.
+- **Correção Manual**: A categoria de qualquer lançamento pode ser trocada direto no extrato, oferecendo apenas categorias compatíveis com a direção do dinheiro.
 - **Tratamento de Transferências (`is_transfer`)**: Identificação automática de movimentações entre contas próprias, aportes e quitações de fatura. Elas são isoladas dos totais de gasto para evitar contagem dupla.
 
 ### 🗓️ Contas a Pagar (`Payables`) & Recorrentes
-- **Gestão de Contas**: Controle de status (Pendentes, Pagas, Atrasadas) com suporte a exclusão otimista e desfaire (*undo*) via toast.
+- **Gestão de Contas**: Controle de status (Pendentes, Pagas, Atrasadas) com exclusão otimista e desfazer (*undo*) via toast.
+- **Origem da Conta**: Cada obrigação sabe de onde veio (fatura, recorrente ou manual). Fatura não é editável nem removível — o sync sobrescreve; recorrente é editável, porque água e energia mudam de valor todo mês.
 - **Templates Recorrentes**: Geração automática de obrigações mensais a partir de modelos pré-configurados sem duplicação.
 - **Detecção Automática**: Sugestão automática de novos templates recorrentes com base no histórico do extrato.
 
@@ -62,8 +67,8 @@ O **LifeOS** evoluiu de um gerenciador manual de checklist de contas a pagar par
 | `Payable` | Conta a pagar individual (`user_id`, FKs para `recurring_payable_id` e `transaction_id`) |
 | `RecurringPayable` | Template de recorrência mensal (título, valor, dia do mês) |
 | `Transaction` | Transação de extrato bancário ou importada (`is_transfer`, `external_category`) |
-| `CreditCardBill` | Fatura de cartão de crédito sincronizada via Pluggy Bills API |
-| `Category` | Categoria com cor personalizada (`color_hex`) por usuário |
+| `CreditCardBill` | Fatura de cartão. `status` (`OPEN`/`CLOSED`), apelido e cor personalizados por cartão |
+| `Category` | Categoria com cor (`color_hex`) e tipo `kind` (`EXPENSE`/`INCOME`) por usuário |
 | `CategoryRule` | Regra de categorização por palavra-chave e prioridade |
 | `Budget` | Orçamento mensal por categoria (`month`, `year`, `amount`) |
 | `BankAccount` | Conta/Conexão bancária conectada via Pluggy |
@@ -74,7 +79,7 @@ O **LifeOS** evoluiu de um gerenciador manual de checklist de contas a pagar par
 ## ⚡ Destaques de Engenharia
 
 - **Timezone Safety**: Datas trafegam e são manipuladas estritamente como strings `YYYY-MM-DD` (evitando bugs de deslocamento por fuso horário/GMT offset).
-- **Isolamento de Transferências**: Transações marcadas como `is_transfer` são filtradas nos cálculos do dashboard e orçamentos, prevenindo que o pagamento de fatura duplique os gastos já contabilizados no cartão.
+- **Isolamento de Transferências**: Transações marcadas como `is_transfer` são filtradas dos cálculos, prevenindo que o pagamento de fatura duplique os gastos já contabilizados no cartão. A detecção não confia só na categoria da Pluggy — ela rotula parte das quitações como `Transfers` genérico, então a descrição também é verificada.
 - **High Availability & Warmup**: Rota raiz responde a requisições `HEAD` mantendo o container no Render ativo via UptimeRobot e eliminando *cold starts*.
 - **Suíte de Testes Leve**: Testes automatizados executam usando SQLite em memória via Pytest, sem necessidade de dependência de banco externo.
 
@@ -107,7 +112,7 @@ npm run dev                   # Servidor de desenvolvimento rodando em http://lo
 ### Testes
 
 ```bash
-cd backend && pytest          # Executa 200+ testes unitários/integração em SQLite
+cd backend && pytest          # Executa 245 testes unitários/integração em SQLite
 cd frontend && npm test       # Executa testes unitários do frontend
 ```
 
@@ -115,10 +120,11 @@ cd frontend && npm test       # Executa testes unitários do frontend
 
 ## 📚 Documentação Complementar
 
-- **[CLAUDE.md](file:///home/dennysdev/Projetos/Pessoal/LifeOS/CLAUDE.md)**: Guia completo de arquitetura, padrões de código, instruções para IA, rotinas de deploy e regras de negócio detalhadas.
-- **[plano_lifeos.md](file:///home/dennysdev/Projetos/Pessoal/LifeOS/plano_lifeos.md)**: Registro histórico das últimas alterações entregues em produção, lições operacionais e backlog futuro.
+- **[CLAUDE.md](./CLAUDE.md)**: Guia completo de arquitetura, padrões de código, instruções para IA, rotinas de deploy e regras de negócio detalhadas.
+- **[plano_lifeos.md](./plano_lifeos.md)**: Registro histórico das alterações entregues em produção, lições operacionais e backlog futuro.
+- **[ultimos_ajustes.md](./ultimos_ajustes.md)**: Relatório detalhado da última rodada de UI/UX.
 
 ---
 
-*Desenvolvido por Dennys Alves — Última atualização: julho de 2026*
+*Desenvolvido por Dennys Alves — Última atualização: agosto de 2026*
 
