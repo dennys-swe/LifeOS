@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date, timedelta
 from typing import List
 from uuid import UUID
@@ -12,6 +13,10 @@ from app.core.config import settings
 from app.models.payable import Payable, PayableStatus
 from app.models.push_subscription import PushSubscription
 from app.schemas.push_subscription import PushSubscriptionCreate
+
+
+def _log(message: str) -> None:
+    print(f"[push] {message}", file=sys.stderr)
 
 
 def save_subscription(
@@ -76,6 +81,10 @@ def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> in
     body = f"Você tem {len(upcoming)} conta(s) vencendo em breve: {', '.join(titles)}"
     payload_data = json.dumps({"title": "LifeOS — Contas Vencendo", "body": body})
 
+    if not subscriptions:
+        _log(f"nenhum device inscrito para o usuário {user_id} — push não enviado")
+        return 0
+
     sent = 0
     for sub in subscriptions:
         try:
@@ -89,7 +98,22 @@ def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> in
                 vapid_claims={"sub": vapid_claims_email},
             )
             sent += 1
-        except Exception:
-            pass
+        except WebPushException as exc:
+            # 404/410 = subscription morta (app desinstalado, permissão revogada,
+            # endpoint rotacionado pelo navegador). Removê-la evita tentar de
+            # novo todo dia contra um device que não existe mais.
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in (404, 410):
+                _log(f"subscription expirada (HTTP {status}), removendo: {sub.endpoint[:60]}")
+                db.delete(sub)
+            else:
+                _log(f"falha ao enviar push (HTTP {status}): {exc}")
+        except Exception as exc:  # noqa: BLE001
+            # Engolir toda exceção em silêncio deixava o push falhar sem deixar
+            # rastro: o job retornava 0 enviados e não havia como distinguir
+            # "ninguém inscrito" de "chave errada" ou "serviço fora do ar".
+            _log(f"erro inesperado ao enviar push: {type(exc).__name__}: {exc}")
 
+    db.commit()
+    _log(f"push: {sent}/{len(subscriptions)} enviados para o usuário {user_id}")
     return sent
