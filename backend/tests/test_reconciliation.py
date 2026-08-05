@@ -109,12 +109,18 @@ def test_suggest_exact_match(db_session, user):
     assert suggestions[0].transaction_id == t.id
 
 
-def test_suggest_amount_tolerance(db_session, user):
+def test_suggest_requires_exact_amount(db_session, user):
+    """Valor aproximado não sugere mais.
+
+    Medido contra os 91 payables já pagos do dono: a tolerância de ±5% achava
+    55 (60%) contra 51 (56%) do valor exato — 4 acertos a mais. Em troca casava
+    qualquer compra de valor parecido dentro da janela de datas (a conta de água
+    de R$ 14 batia com farmácia, encargo e posto), e as 5 sugestões pendentes
+    eram todas falsas.
+    """
     _payable(db_session, user, 100, date(2026, 5, 10))
-    t = _transaction(db_session, user, 103, date(2026, 5, 10))  # 3% dentro da tolerância de 5%
-    suggestions = suggest_reconciliation(db_session, user.id, [t])
-    assert len(suggestions) == 1
-    assert suggestions[0].confidence_score < 1.0
+    t = _transaction(db_session, user, 103, date(2026, 5, 10))  # 3% de diferença
+    assert suggest_reconciliation(db_session, user.id, [t]) == []
 
 
 def test_suggest_date_tolerance(db_session, user):
@@ -295,14 +301,17 @@ def test_suggest_suppresses_approx_match_when_exact_match_exists(db_session, use
     assert suggestions[0].confidence_score == 1.0
 
 
-def test_suggest_keeps_approx_match_when_no_exact_candidate(db_session, user):
+def test_no_suggestion_when_only_approximate_candidate_exists(db_session, user):
+    """Antes um candidato aproximado era mantido por falta de coisa melhor.
+
+    Preferir "nenhuma sugestão" a "uma sugestão provavelmente errada" é o ponto:
+    a tela pede confirmação manual, e palpite ruim gasta a atenção do usuário —
+    ou pior, é confirmado sem conferir e dá baixa na conta errada.
+    """
     _payable(db_session, user, Decimal("655.34"), date(2026, 5, 10))
     approx_tx = _transaction(db_session, user, Decimal("650.00"), date(2026, 5, 10))
 
-    suggestions = suggest_reconciliation(db_session, user.id, [approx_tx])
-
-    assert len(suggestions) == 1
-    assert suggestions[0].confidence_score == 0.6
+    assert suggest_reconciliation(db_session, user.id, [approx_tx]) == []
 
 
 def test_suggest_pending_covers_whole_unreconciled_history(db_session, user):

@@ -15,7 +15,6 @@ from app.models.transaction import Transaction, TransactionType
 from app.schemas.reconciliation import ReconciliationSuggestionResponse
 from app.services.pluggy_category_map import CREDIT_CARD_PAYMENT
 
-AMOUNT_TOLERANCE = Decimal("0.05")
 DATE_TOLERANCE_DAYS = 7
 
 # Descrições "eco" que o banco/Pluggy lança de forma genérica sempre que uma
@@ -50,20 +49,12 @@ def _is_reconcilable():
     )
 
 
-def _amount_in_range(payable_amount: Decimal, tx_amount: Decimal) -> bool:
-    lower = payable_amount * (1 - AMOUNT_TOLERANCE)
-    upper = payable_amount * (1 + AMOUNT_TOLERANCE)
-    return lower <= tx_amount <= upper
-
-
 def _compute_score(exact_amount: bool, exact_date: bool) -> float:
-    if exact_amount and exact_date:
-        return 1.0
-    if exact_amount and not exact_date:
-        return 0.8
-    if not exact_amount and exact_date:
-        return 0.6
-    return 0.5
+    """Só existem dois níveis: o valor sempre bate exato (ver `suggest_reconciliation`),
+    então o que separa 1.0 de 0.8 é a data cair no vencimento ou dentro da janela.
+    Os níveis 0.6/0.5, de valor aproximado, foram removidos por gerarem falso
+    positivo em quase toda sugestão."""
+    return 1.0 if exact_amount and exact_date else 0.8
 
 
 def suggest_pending(db: Session, user_id: UUID) -> List[ReconciliationSuggestionResponse]:
@@ -124,9 +115,15 @@ def suggest_reconciliation(
         for payable in pending_payables:
             p_amount = Decimal(str(payable.amount))
             exact_amount = tx_amount == p_amount
-            approx_amount = _amount_in_range(p_amount, tx_amount)
 
-            if not exact_amount and not approx_amount:
+            # Valor aproximado foi abandonado: medido contra os 91 payables já
+            # pagos do dono, a tolerância de ±5% achava 55 (60%) contra 51 (56%)
+            # do valor exato — 4 acertos a mais. Em troca, casava qualquer
+            # compra de valor parecido na janela de datas: a conta de água de
+            # R$ 14 batia com farmácia, encargo e posto, e as 5 sugestões
+            # pendentes eram todas falsas. Precisão vale mais que 4% de recall
+            # numa tela que pede confirmação manual.
+            if not exact_amount:
                 continue
 
             date_diff = abs((payable.due_date - tx.date).days)
