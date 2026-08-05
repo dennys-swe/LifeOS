@@ -180,6 +180,9 @@ export default function PayablesPage({
       const isDueToday = item.due_date === todayStr && item.status === "PENDING";
       const isOverdue = item.status === "PENDING" && item.due_date < todayStr;
       const cat = item.category_id ? categoryMap.get(item.category_id) : null;
+      // Conta gerada pelo sistema: editar ou excluir não se sustenta, porque o
+      // próximo sync recria e sobrescreve. Dar baixa continua fazendo sentido.
+      const isAuto = item.origin === "BILL" || item.origin === "RECURRING";
 
       return (
         <div
@@ -209,6 +212,26 @@ export default function PayablesPage({
                 <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
                   Vencimento: {formattedDate}
                 </span>
+                {isAuto && (
+                  <span
+                    title={
+                      item.origin === "BILL"
+                        ? "Gerada da fatura sincronizada do cartão — o sync mantém valor e vencimento em dia"
+                        : "Gerada automaticamente a partir de uma conta recorrente"
+                    }
+                    className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400"
+                  >
+                    Automática
+                  </span>
+                )}
+                {item.is_estimated && (
+                  <span
+                    title="A fatura ainda não fechou no banco; o valor muda a cada compra do ciclo"
+                    className="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400"
+                  >
+                    Valor estimado
+                  </span>
+                )}
                 {cat && (
                   <span
                     className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
@@ -246,20 +269,24 @@ export default function PayablesPage({
                   Baixa
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => setEditingPayable(item)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                Editar
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDelete(item.id)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-500 transition hover:bg-rose-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-rose-500/10"
-              >
-                Excluir
-              </button>
+              {!isAuto && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setEditingPayable(item)}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(item.id)}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-500 transition hover:bg-rose-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-rose-500/10"
+                  >
+                    Excluir
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

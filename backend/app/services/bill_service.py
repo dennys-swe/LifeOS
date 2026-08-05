@@ -239,6 +239,9 @@ def upsert_open_bill(
         bill.custom_color_hex = closed.custom_color_hex
 
     bill.synced_at = datetime.now(timezone.utc)
+    # A obrigação existe desde que o ciclo abre; o valor é atualizado a cada
+    # sync enquanto o payable estiver PENDING, e congela quando a fatura fecha.
+    _sync_payable(db, bill, account)
     db.commit()
     db.refresh(bill)
     return bill
@@ -287,12 +290,6 @@ def update_bill_customization(
 def _sync_payable(db: Session, bill: CreditCardBill, account: BankAccount) -> None:
     label = bill.custom_card_name or bill.card_name or account.name
     title = f"Fatura {label} — {bill.due_date.strftime('%m/%Y')}"
-
-    # Fatura em aberto muda de valor a cada compra do ciclo — vira obrigação a
-    # pagar só quando o banco fecha. Quando isso acontece o mesmo registro passa
-    # a CLOSED e cai no fluxo normal abaixo.
-    if bill.status == CreditCardBillStatus.OPEN:
-        return
 
     if bill.payable_id is None:
         # Só a criação é filtrada: um payable que já existe continua sendo

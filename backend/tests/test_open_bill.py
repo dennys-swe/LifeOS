@@ -156,8 +156,14 @@ def _closed_bill(db_session, user, account, due_date):
     )
 
 
-def test_open_bill_does_not_create_payable(db_session, user):
-    """Fatura aberta muda a cada compra — não é obrigação a pagar ainda."""
+def test_open_bill_creates_payable_marked_as_estimated(db_session, user):
+    """Fatura aberta também vira conta a pagar.
+
+    A obrigação existe desde que o ciclo abre — deixá-la de fora só aparecia
+    depois que o banco fechava, poucos dias antes do vencimento, e o dono
+    acabava lançando a conta na mão (gerando duplicata quando a automática
+    chegava). O valor ainda muda, então a resposta marca `is_estimated`.
+    """
     account = _make_account(db_session, user)
     _closed_bill(db_session, user, account, "2026-07-08")
 
@@ -168,9 +174,32 @@ def test_open_bill_does_not_create_payable(db_session, user):
     )
 
     assert bill.status == CreditCardBillStatus.OPEN
-    assert bill.total_amount == Decimal("150.00")
-    assert bill.payable_id is None
-    assert db_session.query(Payable).filter(Payable.title.like("%08/2026%")).count() == 0
+    assert bill.payable_id is not None
+    payable = db_session.get(Payable, bill.payable_id)
+    assert payable.amount == Decimal("150.00")
+
+    from app.services.payable_service import annotate_origin
+    from app.schemas.payable import PayableOrigin
+
+    annotated = annotate_origin(db_session, [payable])[0]
+    assert annotated.origin == PayableOrigin.BILL
+    assert annotated.is_estimated is True
+
+
+def test_open_bill_payable_follows_the_amount_until_it_closes(db_session, user):
+    account = _make_account(db_session, user)
+    _closed_bill(db_session, user, account, "2026-07-08")
+    bill_service.upsert_open_bill(
+        db_session, user.id, account, "pluggy-acc-1",
+        [_tx(150, "2026-07-20", forecast="2026-08")], today=date(2026, 8, 4),
+    )
+    bill = bill_service.upsert_open_bill(
+        db_session, user.id, account, "pluggy-acc-1",
+        [_tx(150, "2026-07-20", forecast="2026-08"), _tx(70, "2026-08-01", forecast="2026-08")],
+        today=date(2026, 8, 4),
+    )
+
+    assert db_session.get(Payable, bill.payable_id).amount == Decimal("220.00")
 
 
 def test_open_bill_needs_a_previous_closed_bill(db_session, user):

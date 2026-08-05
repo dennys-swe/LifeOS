@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from enum import Enum
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -32,9 +33,26 @@ class PayableUpdate(BaseModel):
     category_id: Optional[UUID] = None
 
 
+class PayableOrigin(str, Enum):
+    """De onde veio a conta — a tela precisa distinguir o que é do usuário.
+
+    Editar ou excluir uma conta gerada de fatura não adianta: o próximo sync
+    recria/sobrescreve. Sem esse campo, a tela mostrava os mesmos botões para
+    tudo e não havia como saber o que era seguro mexer.
+    """
+
+    MANUAL = "MANUAL"
+    BILL = "BILL"
+    RECURRING = "RECURRING"
+
+
 class PayableResponse(PayableBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     recurring_payable_id: Optional[UUID] = None
     transaction_id: Optional[UUID] = None
+    origin: PayableOrigin = PayableOrigin.MANUAL
+    # Fatura do ciclo ainda em aberto: o valor muda a cada compra até o banco
+    # fechar. A tela avisa para o número não ser lido como definitivo.
+    is_estimated: bool = False

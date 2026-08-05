@@ -8,8 +8,9 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.credit_card_bill import CreditCardBill, CreditCardBillStatus
 from app.models.payable import Payable, PayableStatus
-from app.schemas.payable import PayableCreate, PayableUpdate
+from app.schemas.payable import PayableOrigin, PayableCreate, PayableUpdate
 
 
 def create_payable(db: Session, user_id: UUID, payload: PayableCreate) -> Payable:
@@ -34,7 +35,39 @@ def list_payables(
         )
 
     result = db.execute(query.order_by(Payable.due_date.asc()))
-    return result.scalars().all()
+    return annotate_origin(db, result.scalars().all())
+
+
+def annotate_origin(db: Session, payables: Iterable[Payable]) -> list[Payable]:
+    """Marca cada payable com `origin`/`is_estimated` para a resposta da API.
+
+    São atributos calculados, não colunas: a origem já está implícita no
+    `recurring_payable_id` e no `CreditCardBill.payable_id` que aponta de
+    volta. Resolver as faturas em **uma** consulta evita um N+1 na listagem.
+    """
+    payables = list(payables)
+    if not payables:
+        return payables
+
+    bills = db.execute(
+        select(CreditCardBill.payable_id, CreditCardBill.status).where(
+            CreditCardBill.payable_id.in_([p.id for p in payables])
+        )
+    ).all()
+    bill_status = {payable_id: status for payable_id, status in bills}
+
+    for payable in payables:
+        status = bill_status.get(payable.id)
+        if status is not None:
+            payable.origin = PayableOrigin.BILL
+            payable.is_estimated = status == CreditCardBillStatus.OPEN
+        elif payable.recurring_payable_id is not None:
+            payable.origin = PayableOrigin.RECURRING
+            payable.is_estimated = False
+        else:
+            payable.origin = PayableOrigin.MANUAL
+            payable.is_estimated = False
+    return payables
 
 
 def get_payable(db: Session, user_id: UUID, payable_id: UUID) -> Optional[Payable]:
