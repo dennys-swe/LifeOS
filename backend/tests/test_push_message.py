@@ -62,3 +62,11 @@ def test_valor_usa_formato_brasileiro():
     n = build_notification([_p("Aluguel", "1234.50", 10)], HOJE)
 
     assert n["body"] == "R$ 1.234,50"
+
+
+def test_ordem_segue_o_vencimento():
+    """A query alimenta `build_notification` já ordenada; a mensagem preserva
+    essa ordem. Numa lista truncada em 3, o que fica de fora importa."""
+    n = build_notification([_p("Água", "14.00", 7), _p("Fatura Nubank", "588.37", 8)], HOJE)
+
+    assert n["body"].index("Água") < n["body"].index("Fatura Nubank")

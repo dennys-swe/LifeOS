@@ -148,6 +148,10 @@ def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> in
             Payable.due_date >= today,
             Payable.due_date <= until,
         )
+        # Sem ordenar, o banco devolve em ordem arbitrária e a notificação
+        # listava a conta de 08/08 antes da de 07/08. Numa mensagem truncada em
+        # 3 itens, a ordem decide o que o usuário chega a ler.
+        .order_by(Payable.due_date.asc(), Payable.amount.desc())
     ).scalars().all()
 
     if not upcoming:
