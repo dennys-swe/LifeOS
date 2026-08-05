@@ -5,30 +5,24 @@ Pendências abertas. O que já foi entregue está no histórico do git e descrit
 
 ---
 
-## 1. Cron Job do Render nunca foi confirmado
+## 1. ~~Cron Job do Render~~ — resolvido via GitHub Actions
 
-**Impacto:** sem ele, `daily_sync` não roda sozinho. Duas coisas ficam sem gatilho:
+**Confirmado em 05/08/2026:** o workspace do Render não tem Cron Job — a lista
+de serviços mostra só `lifeos-backend` como Web Service (`All (1)`). Cron Job
+também não entra no plano Free. Portanto `daily_sync` **nunca rodou sozinho**:
+os payables recorrentes do mês só eram gerados quando alguém abria a tela de
+Contas, e o push de vencimento não tinha gatilho nenhum.
 
-- geração dos payables do mês a partir dos recorrentes — hoje só acontece quando
-  alguém abre a tela de Contas, que chama `/recurring-payables/generate`;
-- **push de contas vencendo — não tem nenhum outro gatilho.**
+**Resolvido** por `.github/workflows/daily-sync.yml`, que chama
+`POST /jobs/daily-sync` com `X-Cron-Secret` às 08:00 BRT. Mesmo código que um
+Render Cron Job executaria.
 
-**Evidência de que não roda (04/08/2026):** as contas conectadas tinham
-`last_sync_at` de 30/07 (Inter) contra 04/08 (Nubank, Itaú). Um job diário
-sincroniza todas na mesma passada e não produziria essa defasagem — o que
-mantém os dados em dia é o webhook da Pluggy, que dispara por item e só cobre
-dados bancários.
+**Pendente de setup manual:** criar o secret `CRON_SECRET` no repositório
+(Settings > Secrets and variables > Actions) com o mesmo valor da env var do
+Render. Sem isso o workflow falha explicitamente em vez de rodar em silêncio.
 
-**Como verificar:** dashboard do Render → o serviço `lifeos-backend` aparece
-como *Web Service*; um Cron Job seria uma entrada separada na lista.
-
-**Como resolver:** `render.yaml` já tem o Cron Job descrito (`lifeos-daily-sync`,
-08:00 BRT). Ele só é aplicado se o repositório for conectado como **Blueprint** —
-serviço criado à mão pelo dashboard ignora o arquivo. Alternativa sem depender
-do plano do Render: qualquer agendador externo chamando
-`POST /jobs/daily-sync` com o header `X-Cron-Secret`.
-
----
+`render.yaml` foi mantido como documentação da configuração equivalente, caso o
+serviço migre para Blueprint num plano pago.
 
 ## 2. Categoria `Services` da Pluggy sem mapeamento
 

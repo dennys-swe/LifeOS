@@ -1,0 +1,58 @@
+# Agendador do daily_sync.
+#
+# Por que aqui e não no Render: o workspace não tem Cron Job (verificado em
+# 05/08/2026 — a lista de serviços mostra só o web service `lifeos-backend`), e
+# Cron Job no Render não entra no plano Free. Sem nenhum agendador, `daily_sync`
+# nunca roda sozinho: os payables recorrentes do mês só são gerados quando
+# alguém abre a tela de Contas, e o push de vencimento não tem gatilho nenhum.
+#
+# Chama o mesmo código que um Render Cron Job chamaria, só que por HTTP:
+# POST /jobs/daily-sync protegido por X-Cron-Secret.
+#
+# Setup necessário (uma vez): Settings > Secrets and variables > Actions,
+# criar `CRON_SECRET` com o mesmo valor da env var do Render.
+
+name: daily-sync
+
+on:
+  schedule:
+    # 11:00 UTC = 08:00 em São Paulo. O agendador do GitHub pode atrasar alguns
+    # minutos em horário de pico — irrelevante para um job diário.
+    - cron: "0 11 * * *"
+  workflow_dispatch: # permite disparar à mão pela aba Actions
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acordar o serviço
+        # A instância Free hiberna por inatividade e demora 50s+ para voltar.
+        # Uma chamada barata ao health check evita que a requisição do job
+        # gaste esse tempo (e falhe por timeout) enquanto o container sobe.
+        run: |
+          curl -fsS --max-time 120 --retry 3 --retry-all-errors \
+            https://lifeos-backend-sa9n.onrender.com/ > /dev/null || true
+
+      - name: Disparar daily-sync
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET não configurado nos secrets do repositório."
+            exit 1
+          fi
+
+          # O endpoint roda o sync de forma síncrona (todas as contas de todos
+          # os usuários), então a resposta demora minutos. Timeout generoso.
+          codigo=$(curl -s -o /tmp/resposta.json -w "%{http_code}" \
+            --max-time 900 \
+            -X POST https://lifeos-backend-sa9n.onrender.com/jobs/daily-sync \
+            -H "X-Cron-Secret: $CRON_SECRET")
+
+          echo "HTTP $codigo"
+          cat /tmp/resposta.json || true
+
+          if [ "$codigo" != "200" ]; then
+            echo "::error::daily-sync falhou (HTTP $codigo)"
+            exit 1
+          fi
