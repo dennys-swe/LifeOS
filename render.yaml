@@ -1,0 +1,73 @@
+# Blueprint do Render.
+#
+# ATENÇÃO: este arquivo sozinho NÃO cria nada. O Render só o aplica quando o
+# repositório é conectado como **Blueprint** (New > Blueprint). Serviços criados
+# manualmente pelo dashboard continuam sendo gerenciados pelo dashboard e
+# ignoram este arquivo.
+#
+# Motivo de existir: o Cron Job abaixo nunca foi confirmado como existente.
+# Evidência de que não roda: em 04/08/2026 as contas conectadas tinham
+# `last_sync_at` de 30/07 (Inter) e 04/08 (Nubank, Itaú) — defasagem que um job
+# diário não produziria, já que ele sincroniza todas na mesma passada. O que
+# mantém os dados atualizados hoje é o webhook da Pluggy, que dispara por item
+# e só cobre dados bancários.
+#
+# Sem o Cron Job, duas coisas não acontecem sozinhas:
+#   - geração dos payables do mês a partir dos recorrentes (hoje só acontece
+#     quando alguém abre a tela de Contas, que chama /recurring-payables/generate)
+#   - push de contas vencendo (não tem nenhum outro gatilho)
+
+services:
+  - type: web
+    name: lifeos-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: PLUGGY_CLIENT_ID
+        sync: false
+      - key: PLUGGY_CLIENT_SECRET
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_CLAIMS_EMAIL
+        sync: false
+
+  # Alternativa ao cron: qualquer agendador externo pode chamar
+  #   POST https://<backend>/jobs/daily-sync
+  #   header: X-Cron-Secret: <CRON_SECRET>
+  # É o mesmo código, e serve se o plano do Render não incluir Cron Job.
+  - type: cron
+    name: lifeos-daily-sync
+    runtime: python
+    rootDir: backend
+    schedule: "0 11 * * *" # 08:00 em São Paulo (UTC-3)
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.jobs.daily_sync
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: PLUGGY_CLIENT_ID
+        sync: false
+      - key: PLUGGY_CLIENT_SECRET
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_CLAIMS_EMAIL
+        sync: false

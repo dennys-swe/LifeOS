@@ -121,8 +121,7 @@ cd frontend && npm test       # Executa testes unitários do frontend
 ## 📚 Documentação Complementar
 
 - **[CLAUDE.md](./CLAUDE.md)**: Guia completo de arquitetura, padrões de código, instruções para IA, rotinas de deploy e regras de negócio detalhadas.
-- **[plano_lifeos.md](./plano_lifeos.md)**: Registro histórico das alterações entregues em produção, lições operacionais e backlog futuro.
-- **[ultimos_ajustes.md](./ultimos_ajustes.md)**: Relatório detalhado da última rodada de UI/UX.
+- **[BACKLOG.md](./BACKLOG.md)**: Pendências abertas — o que ainda não existe, com o porquê e como resolver.
 
 ---
 
