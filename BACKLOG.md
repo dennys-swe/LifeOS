@@ -17,9 +17,16 @@ Contas, e o push de vencimento não tinha gatilho nenhum.
 `POST /jobs/daily-sync` com `X-Cron-Secret` às 08:00 BRT. Mesmo código que um
 Render Cron Job executaria.
 
-**Pendente de setup manual:** criar o secret `CRON_SECRET` no repositório
-(Settings > Secrets and variables > Actions) com o mesmo valor da env var do
-Render. Sem isso o workflow falha explicitamente em vez de rodar em silêncio.
+**Validado em produção (05/08/2026):** primeira execução real do `daily_sync`
+desde que ele foi escrito — `{"processed_users":1,"synced_accounts":3,"errors":0}`,
+as 3 conexões sincronizadas na mesma passada e push entregue no iPhone (a
+subscription sobreviveu, então a Apple não rejeitou).
+
+Percalço do setup, para referência: o `CRON_SECRET` do Render estava com o
+placeholder do `.env.example` **duplicado** (`dev-cron-secret-change-in-prod`
+colado duas vezes), o que dava 403 mesmo com o secret configurado no GitHub.
+Trocado por um valor forte nos dois lados. O `.env` local segue com valor
+próprio de propósito — assim um teste local nunca autentica contra produção.
 
 `render.yaml` foi mantido como documentação da configuração equivalente, caso o
 serviço migre para Blueprint num plano pago.
