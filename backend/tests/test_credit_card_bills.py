@@ -365,3 +365,82 @@ def test_update_card_alias_updates_all_bills_and_payables(client, db_session, us
     assert "Fatura Inter Black —" in payable1.title
     assert "Fatura Inter Black —" in payable2.title
 
+
+
+def test_update_card_color_applies_to_all_bills_of_the_card(client, db_session, user):
+    acc = _make_account(db_session, user)
+    bill1 = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload("b1", _iso(_in_window(10)))
+    )
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload("b2", _iso(_in_window(10, months_ahead=1)))
+    )
+
+    response = client.patch(f"/credit-card-bills/{bill1.id}", json={"custom_color_hex": "#7c3aed"})
+    assert response.status_code == 200
+
+    bills = db_session.query(CreditCardBill).filter(
+        CreditCardBill.pluggy_account_id == "pluggy-acc-1"
+    ).all()
+    assert {b.custom_color_hex for b in bills} == {"#7c3aed"}
+
+
+def test_update_color_does_not_wipe_alias(client, db_session, user):
+    """PATCH parcial: mexer na cor não pode apagar o apelido já definido."""
+    acc = _make_account(db_session, user)
+    bill = bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload())
+
+    client.patch(f"/credit-card-bills/{bill.id}", json={"custom_card_name": "Nubank Roxinho"})
+    client.patch(f"/credit-card-bills/{bill.id}", json={"custom_color_hex": "#7c3aed"})
+
+    db_session.refresh(bill)
+    assert bill.custom_card_name == "Nubank Roxinho"
+    assert bill.custom_color_hex == "#7c3aed"
+
+
+def test_update_alias_does_not_wipe_color(client, db_session, user):
+    acc = _make_account(db_session, user)
+    bill = bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload())
+
+    client.patch(f"/credit-card-bills/{bill.id}", json={"custom_color_hex": "#7c3aed"})
+    client.patch(f"/credit-card-bills/{bill.id}", json={"custom_card_name": "Nubank Roxinho"})
+
+    db_session.refresh(bill)
+    assert bill.custom_color_hex == "#7c3aed"
+    assert bill.custom_card_name == "Nubank Roxinho"
+
+
+def test_color_can_be_reset_to_default(client, db_session, user):
+    acc = _make_account(db_session, user)
+    bill = bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload())
+    client.patch(f"/credit-card-bills/{bill.id}", json={"custom_color_hex": "#7c3aed"})
+
+    client.patch(f"/credit-card-bills/{bill.id}", json={"custom_color_hex": None})
+
+    db_session.refresh(bill)
+    assert bill.custom_color_hex is None
+
+
+def test_rejects_malformed_color(client, db_session, user):
+    acc = _make_account(db_session, user)
+    bill = bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload())
+
+    assert client.patch(
+        f"/credit-card-bills/{bill.id}", json={"custom_color_hex": "roxo"}
+    ).status_code == 422
+
+
+def test_new_bill_inherits_card_color(db_session, user):
+    """A cor é do cartão: fatura sincronizada depois já nasce com ela."""
+    acc = _make_account(db_session, user)
+    first = bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload("b1"))
+    bill_service.update_bill_customization(
+        db_session, user.id, first.id, {"custom_color_hex": "#7c3aed"}
+    )
+
+    later = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1",
+        _bill_payload("b2", _iso(_in_window(10, months_ahead=1))),
+    )
+
+    assert later.custom_color_hex == "#7c3aed"

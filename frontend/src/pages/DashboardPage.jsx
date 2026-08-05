@@ -38,6 +38,54 @@ function IconPencil({ className }) {
   );
 }
 
+// Cores dos cartões reais são fortes e saturadas; o padrão (null) mantém o
+// visual grafite de antes.
+const CARD_COLORS = [
+  { hex: null, label: "Padrão" },
+  { hex: "#7c3aed", label: "Roxo" },
+  { hex: "#e11d48", label: "Vermelho" },
+  { hex: "#ea580c", label: "Laranja" },
+  { hex: "#f59e0b", label: "Âmbar" },
+  { hex: "#059669", label: "Verde" },
+  { hex: "#0284c7", label: "Azul" },
+  { hex: "#db2777", label: "Rosa" },
+];
+
+function CardColorPicker({ current, onPick, onClose }) {
+  return (
+    <>
+      {/* Clique fora fecha — sem isso o popover só sairia ao escolher uma cor. */}
+      <button
+        type="button"
+        aria-label="Fechar seletor de cor"
+        className="fixed inset-0 z-40 cursor-default"
+        onClick={onClose}
+      />
+      <div className="absolute left-0 top-12 z-50 flex w-max gap-1.5 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+        {CARD_COLORS.map(({ hex, label }) => {
+          const isActive = (current || null) === hex;
+          return (
+            <button
+              key={label}
+              type="button"
+              title={label}
+              onClick={() => onPick(hex)}
+              style={hex ? { backgroundColor: hex } : undefined}
+              className={`h-7 w-7 rounded-lg transition ${
+                hex ? "" : "bg-slate-900 dark:bg-slate-700"
+              } ${
+                isActive
+                  ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-900"
+                  : "hover:scale-110"
+              }`}
+            />
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 function BillStatusBadge({ status }) {
   const isOpen = status === "OPEN";
   return (
@@ -67,6 +115,7 @@ export default function DashboardPage({ month, year, onMonthChange }) {
   const [bills, setBills] = useState([]);
   const [editingBillId, setEditingBillId] = useState(null);
   const [editingAliasValue, setEditingAliasValue] = useState("");
+  const [colorPickerBillId, setColorPickerBillId] = useState(null);
 
   const handleStartEditAlias = (bill) => {
     setEditingBillId(bill.id);
@@ -85,6 +134,23 @@ export default function DashboardPage({ month, year, onMonthChange }) {
     try {
       await api.patch(`/credit-card-bills/${bill.id}`, { custom_card_name: newCustomName });
       refresh?.();
+    } catch {
+      api.get("/credit-card-bills", { params: { month, year } }).then((r) => setBills(r.data ?? []));
+    }
+  };
+
+  const handlePickColor = async (bill, color) => {
+    setColorPickerBillId(null);
+    // A cor é do cartão, não da fatura — todas as faturas do mesmo cartão
+    // mudam juntas, igual ao backend faz.
+    setBills((prev) =>
+      prev.map((b) =>
+        b.pluggy_account_id === bill.pluggy_account_id ? { ...b, custom_color_hex: color } : b
+      )
+    );
+
+    try {
+      await api.patch(`/credit-card-bills/${bill.id}`, { custom_color_hex: color });
     } catch {
       api.get("/credit-card-bills", { params: { month, year } }).then((r) => setBills(r.data ?? []));
     }
@@ -290,8 +356,33 @@ export default function DashboardPage({ month, year, onMonthChange }) {
                       className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/60 bg-gradient-to-r from-slate-50 to-white p-4 transition-all hover:border-slate-300 dark:border-slate-800/60 dark:from-slate-900/80 dark:to-slate-900/40"
                     >
                       <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white dark:bg-slate-800 dark:text-emerald-400 shadow-sm">
-                          <IconCreditCard className="h-5 w-5" />
+                        <div className="relative flex-shrink-0">
+                          <button
+                            type="button"
+                            title="Clique para escolher a cor do cartão"
+                            onClick={() =>
+                              setColorPickerBillId(colorPickerBillId === bill.id ? null : bill.id)
+                            }
+                            style={
+                              bill.custom_color_hex
+                                ? { backgroundColor: bill.custom_color_hex }
+                                : undefined
+                            }
+                            className={`flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-sm transition hover:brightness-110 ${
+                              bill.custom_color_hex
+                                ? ""
+                                : "bg-slate-900 dark:bg-slate-800 dark:text-emerald-400"
+                            }`}
+                          >
+                            <IconCreditCard className="h-5 w-5" />
+                          </button>
+                          {colorPickerBillId === bill.id && (
+                            <CardColorPicker
+                              current={bill.custom_color_hex}
+                              onPick={(hex) => handlePickColor(bill, hex)}
+                              onClose={() => setColorPickerBillId(null)}
+                            />
+                          )}
                         </div>
 
                         <div className="min-w-0 flex-1">

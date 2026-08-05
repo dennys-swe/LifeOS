@@ -94,12 +94,20 @@ def upsert_bill(
         if bill is not None:
             bill.external_id = external_id
 
-    # Herda custom_card_name se já existir para este pluggy_account_id
+    # Herda as personalizações do cartão (apelido e cor) se já existirem para
+    # este pluggy_account_id — são do cartão, não da fatura individual.
     existing_custom = db.execute(
         select(CreditCardBill.custom_card_name).where(
             CreditCardBill.user_id == user_id,
             CreditCardBill.pluggy_account_id == pluggy_account_id,
             CreditCardBill.custom_card_name.isnot(None),
+        )
+    ).scalars().first()
+    existing_color = db.execute(
+        select(CreditCardBill.custom_color_hex).where(
+            CreditCardBill.user_id == user_id,
+            CreditCardBill.pluggy_account_id == pluggy_account_id,
+            CreditCardBill.custom_color_hex.isnot(None),
         )
     ).scalars().first()
 
@@ -111,6 +119,7 @@ def upsert_bill(
             external_id=external_id,
             card_name=card_name,
             custom_card_name=existing_custom,
+            custom_color_hex=existing_color,
             due_date=due_date,
             total_amount=total_amount,
             status=CreditCardBillStatus.CLOSED,
@@ -135,6 +144,8 @@ def upsert_bill(
             bill.card_name = card_name
         if existing_custom:
             bill.custom_card_name = existing_custom
+        if existing_color:
+            bill.custom_color_hex = existing_color
 
     bill.synced_at = datetime.now(timezone.utc)
 
@@ -213,6 +224,7 @@ def upsert_open_bill(
             external_id=f"open:{pluggy_account_id}:{target_due:%Y-%m}",
             card_name=card_name,
             custom_card_name=closed.custom_card_name,
+            custom_color_hex=closed.custom_color_hex,
             due_date=target_due,
             total_amount=amount,
             status=CreditCardBillStatus.OPEN,
@@ -224,6 +236,7 @@ def upsert_open_bill(
         if card_name:
             bill.card_name = card_name
         bill.custom_card_name = closed.custom_card_name
+        bill.custom_color_hex = closed.custom_color_hex
 
     bill.synced_at = datetime.now(timezone.utc)
     db.commit()
@@ -231,9 +244,15 @@ def upsert_open_bill(
     return bill
 
 
-def update_bill_alias(
-    db: Session, user_id: UUID, bill_id: UUID, custom_card_name: Optional[str]
+def update_bill_customization(
+    db: Session, user_id: UUID, bill_id: UUID, changes: dict
 ) -> Optional[CreditCardBill]:
+    """Aplica apelido e/ou cor a **todas** as faturas do mesmo cartão.
+
+    `changes` traz só os campos que o cliente mandou (`exclude_unset`): editar a
+    cor não pode apagar o apelido, e vice-versa. Um campo presente com `None`
+    é uma limpeza explícita.
+    """
     bill = db.execute(
         select(CreditCardBill).where(
             CreditCardBill.id == bill_id, CreditCardBill.user_id == user_id
@@ -243,7 +262,9 @@ def update_bill_alias(
     if bill is None:
         return None
 
-    clean_name = custom_card_name.strip() if custom_card_name and custom_card_name.strip() else None
+    if "custom_card_name" in changes:
+        raw = changes["custom_card_name"]
+        changes["custom_card_name"] = raw.strip() if raw and raw.strip() else None
 
     all_bills = db.execute(
         select(CreditCardBill).where(
@@ -253,7 +274,8 @@ def update_bill_alias(
     ).scalars().all()
 
     for b in all_bills:
-        b.custom_card_name = clean_name
+        for field, value in changes.items():
+            setattr(b, field, value)
         db.add(b)
         _sync_payable(db, b, b.bank_account)
 

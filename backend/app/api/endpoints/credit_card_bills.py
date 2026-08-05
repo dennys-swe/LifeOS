@@ -25,13 +25,18 @@ def list_credit_card_bills(
 
 
 @router.patch("/{bill_id}", response_model=CreditCardBillResponse)
-def update_credit_card_bill_alias(
+def update_credit_card_bill(
     bill_id: UUID,
     payload: CreditCardBillUpdate,
     db: Session = Depends(get_db),
     user: User = Depends(current_active_user),
 ):
-    updated = bill_service.update_bill_alias(db, user.id, bill_id, payload.custom_card_name)
+    # `exclude_unset`: alterar só a cor não pode apagar o apelido, e vice-versa.
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="Nada para atualizar.")
+
+    updated = bill_service.update_bill_customization(db, user.id, bill_id, changes)
     if updated is None:
         raise HTTPException(status_code=404, detail="Fatura não encontrada.")
     return updated
