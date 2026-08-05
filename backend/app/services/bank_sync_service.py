@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
 from app.models.bank_account import BankAccount, BankAccountSyncStatus
-from app.models.category import Category
+from app.models.category import Category, CategoryKind
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate
 from app.services import bill_service
@@ -158,6 +158,28 @@ def _transaction_type(tx: dict) -> TransactionType:
     return TransactionType.INCOME if (tx.get("amount") or 0) > 0 else TransactionType.EXPENSE
 
 
+def _category_for_direction(
+    category_id: Optional[UUID],
+    tx_type: TransactionType,
+    kind_by_id: dict,
+) -> Optional[UUID]:
+    """Aceita a categoria só se o tipo dela casar com a direção do dinheiro.
+
+    Regra de keyword não sabe direção: uma regra `UBER -> Renda extra`, criada
+    para os repasses de motorista de app, também casaria com uma corrida paga
+    pelo usuário e marcaria a despesa com categoria de receita. Sem categoria
+    é melhor que categoria errada — o lançamento aparece como "sem categoria"
+    e é corrigível na tela.
+    """
+    if category_id is None:
+        return None
+    kind = kind_by_id.get(category_id)
+    if kind is None:
+        return category_id
+    wanted = CategoryKind.INCOME if tx_type == TransactionType.INCOME else CategoryKind.EXPENSE
+    return category_id if kind == wanted else None
+
+
 def sync_account(db: Session, account: BankAccount) -> dict:
     if not account.external_id:
         raise ValueError("Conta sem item_id da Pluggy. Conecte o banco primeiro.")
@@ -173,12 +195,11 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     # se registrou antes de "Saúde"/"Compras"/"Taxas"/"Seguros" entrarem no
     # DEFAULT_CATEGORIES ainda não as tem.
     seed_default_categories(db, account.user_id)
-    category_ids_by_name = {
-        cat.name: cat.id
-        for cat in db.execute(
-            select(Category).where(Category.user_id == account.user_id)
-        ).scalars().all()
-    }
+    user_categories = db.execute(
+        select(Category).where(Category.user_id == account.user_id)
+    ).scalars().all()
+    category_ids_by_name = {cat.name: cat.id for cat in user_categories}
+    category_kind_by_id = {cat.id: cat.kind for cat in user_categories}
 
     with get_api_client() as ac:
         account_api = pluggy_sdk.AccountApi(ac)
@@ -268,12 +289,19 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                     category_id = None
                     for keyword, mapped_id in keyword_map.items():
                         if keyword in normalized:
-                            category_id = UUID(mapped_id)
-                            break
+                            category_id = _category_for_direction(
+                                UUID(mapped_id), tx_type, category_kind_by_id
+                            )
+                            if category_id is not None:
+                                break
                     if category_id is None:
-                        mapped_name = category_name_for(pluggy_category)
+                        mapped_name = category_name_for(
+                            pluggy_category, is_income=(tx_type == TransactionType.INCOME)
+                        )
                         if mapped_name:
-                            category_id = category_ids_by_name.get(mapped_name)
+                            category_id = _category_for_direction(
+                                category_ids_by_name.get(mapped_name), tx_type, category_kind_by_id
+                            )
 
                     new_tx = Transaction(
                         user_id=account.user_id,
@@ -283,7 +311,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         type=tx_type,
                         source=source_key,
                         category_id=category_id,
-                        is_transfer=is_transfer(pluggy_category),
+                        is_transfer=is_transfer(pluggy_category, description),
                         external_category=(pluggy_category or None),
                     )
                     db.add(new_tx)

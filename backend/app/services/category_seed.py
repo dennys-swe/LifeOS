@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.category import Category
+from app.models.category import Category, CategoryKind
 
 DEFAULT_CATEGORIES = [
     {"name": "Moradia", "color_hex": "#38BDF8"},
@@ -25,6 +25,17 @@ DEFAULT_CATEGORIES = [
     # tem natureza de consumo. Sem essa categoria eram ~21% das transações
     # entrando no total de despesa sem aparecer no "gastos por categoria".
     {"name": "Transferências", "color_hex": "#64748B"},
+    # Serviços recorrentes (streaming, IA, apps). Antes ficavam espalhados entre
+    # "Lazer" (Digital services) e "Transferências" — a Pluggy classificou a
+    # assinatura do Claude como `Transfers`, sem natureza de consumo nenhuma.
+    {"name": "Assinaturas", "color_hex": "#F472B6"},
+    # Receita. Antes não havia nenhuma categoria de entrada, então dinheiro
+    # recebido caía em "Transferências" — categoria de PIX **enviado**, ou seja,
+    # de gasto. Ver `pluggy_category_map`, que agora mapeia o ramo Income.
+    {"name": "Salário", "color_hex": "#10B981", "kind": CategoryKind.INCOME},
+    {"name": "Renda extra", "color_hex": "#8B5CF6", "kind": CategoryKind.INCOME},
+    {"name": "Benefícios", "color_hex": "#F59E0B", "kind": CategoryKind.INCOME},
+    {"name": "Outras receitas", "color_hex": "#06B6D4", "kind": CategoryKind.INCOME},
 ]
 
 

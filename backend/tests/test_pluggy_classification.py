@@ -300,3 +300,91 @@ def test_transfer_and_mapped_categories_do_not_overlap():
 def test_helpers_handle_none():
     assert is_transfer(None) is False
     assert category_name_for(None) is None
+
+
+def test_income_from_pluggy_income_branch():
+    """O ramo Income da Pluggy nunca esteve mapeado — salário ficava sem categoria."""
+    assert category_name_for("Salary", is_income=True) == "Salário"
+    assert category_name_for("Retirement", is_income=True) == "Salário"
+    assert category_name_for("Entrepreneurial activities", is_income=True) == "Renda extra"
+    assert category_name_for("Government aid", is_income=True) == "Benefícios"
+    assert category_name_for("Non-recurring income", is_income=True) == "Outras receitas"
+
+
+def test_same_pluggy_category_means_opposite_things_by_direction():
+    """PIX enviado é gasto; PIX recebido é receita. A categoria da Pluggy é a mesma."""
+    assert category_name_for("Transfer - PIX", is_income=False) == "Transferências"
+    assert category_name_for("Transfer - PIX", is_income=True) == "Outras receitas"
+    assert category_name_for("Transfers", is_income=True) == "Outras receitas"
+
+
+def test_income_never_lands_in_an_expense_category():
+    """Repasse semanal da Uber (renda de motorista de app) vinha como
+    `Taxi and ride-hailing` e ia parar em "Transporte" — receita dentro de uma
+    categoria de gasto. A Pluggy classifica pelo estabelecimento, não pela
+    direção, então repasse e estorno são indistinguíveis aqui: o destino
+    honesto é "Outras receitas", e quem quiser precisão cria uma regra."""
+    assert category_name_for("Taxi and ride-hailing", is_income=True) == "Outras receitas"
+    assert category_name_for("Shopping", is_income=True) == "Outras receitas"
+    # A mesma categoria continua sendo despesa quando o dinheiro sai.
+    assert category_name_for("Taxi and ride-hailing", is_income=False) == "Transporte"
+
+
+def test_income_categories_are_seeded_with_income_kind(db_session, user):
+    from app.models.category import Category, CategoryKind
+    from app.services.category_seed import seed_default_categories
+
+    seed_default_categories(db_session, user.id)
+    cats = db_session.query(Category).filter(Category.user_id == user.id).all()
+    by_name = {c.name: c for c in cats}
+
+    assert by_name["Salário"].kind == CategoryKind.INCOME
+    assert by_name["Outras receitas"].kind == CategoryKind.INCOME
+    assert by_name["Mercado"].kind == CategoryKind.EXPENSE
+    assert by_name["Transferências"].kind == CategoryKind.EXPENSE
+
+
+def test_rule_pointing_to_income_category_is_ignored_on_an_expense():
+    """Regra de keyword não sabe direção: `UBER -> Renda extra`, criada para os
+    repasses, também casaria com uma corrida paga pelo usuário."""
+    from uuid import uuid4
+
+    from app.models.category import CategoryKind
+    from app.models.transaction import TransactionType
+    from app.services.bank_sync_service import _category_for_direction
+
+    renda_extra, mercado = uuid4(), uuid4()
+    kinds = {renda_extra: CategoryKind.INCOME, mercado: CategoryKind.EXPENSE}
+
+    # despesa não aceita categoria de receita — fica sem categoria, corrigível
+    assert _category_for_direction(renda_extra, TransactionType.EXPENSE, kinds) is None
+    # e a entrada não aceita categoria de gasto
+    assert _category_for_direction(mercado, TransactionType.INCOME, kinds) is None
+    # combinações corretas passam
+    assert _category_for_direction(renda_extra, TransactionType.INCOME, kinds) == renda_extra
+    assert _category_for_direction(mercado, TransactionType.EXPENSE, kinds) == mercado
+
+
+def test_bill_payment_is_transfer_even_when_pluggy_says_transfers():
+    """A Pluggy nem sempre marca a quitação como `Credit card payment`: nos
+    dados reais 13 lançamentos vieram como `Transfers` genérico. Sem detectar
+    pela descrição, a quitação conta como gasto e a mesma grana entra duas
+    vezes — a compra no cartão E o pagamento da fatura."""
+    assert is_transfer("Transfers", "Pagamento de fatura") is True
+    assert is_transfer("Transfers", "PAGAMENTO FATURA INTER - Pagamento fatura") is True
+    assert is_transfer(None, "Pagamento de fatura FATURA PAGA LUIZA PREF") is True
+    # PIX comum continua sendo gasto de verdade
+    assert is_transfer("Transfers", "Transferência enviada|Marco Antonio") is False
+    assert is_transfer("Transfer - PIX", "Pix enviado Larissa") is False
+
+
+def test_bill_payment_is_excluded_from_spending(db_session, user):
+    acc = _account(db_session, user)
+
+    _sync(
+        db_session,
+        acc,
+        [_tx("t1", -471.32, "Pagamento de fatura", tipo="DEBIT", category="Transfers")],
+    )
+
+    assert db_session.query(Transaction).one().is_transfer is True
