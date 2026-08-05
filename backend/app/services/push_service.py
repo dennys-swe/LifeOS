@@ -19,6 +19,26 @@ def _log(message: str) -> None:
     print(f"[push] {message}", file=sys.stderr)
 
 
+def _vapid_key(raw: str):
+    """Normaliza a chave VAPID para o formato que o `pywebpush` aceita.
+
+    `webpush(vapid_private_key=...)` trata uma string de três formas: instância
+    `Vapid01`, caminho de arquivo existente, ou **base64** — nessa ordem. O
+    conteúdo de um PEM cai no último caso e estoura em
+    `Could not deserialize key data ... ASN.1 parsing error`, porque ele tenta
+    decodificar os cabeçalhos `-----BEGIN-----` como base64.
+
+    Era por isso que nenhuma notificação chegava: a exceção acontecia antes de
+    qualquer requisição sair, então a subscription nunca era rejeitada e nada
+    indicava falha do lado do navegador.
+    """
+    if "BEGIN" in raw:
+        from py_vapid import Vapid01
+
+        return Vapid01.from_pem(raw.encode())
+    return raw
+
+
 def save_subscription(
     db: Session, user_id: UUID, payload: PushSubscriptionCreate
 ) -> PushSubscription:
@@ -94,7 +114,7 @@ def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> in
                     "keys": {"p256dh": sub.p256dh, "auth": sub.auth},
                 },
                 data=payload_data,
-                vapid_private_key=vapid_private,
+                vapid_private_key=_vapid_key(vapid_private),
                 vapid_claims={"sub": vapid_claims_email},
             )
             sent += 1
