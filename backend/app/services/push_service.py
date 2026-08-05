@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import List
 from uuid import UUID
 
@@ -62,6 +63,65 @@ def save_subscription(
     return sub
 
 
+def _brl(value) -> str:
+    inteiro = f"{Decimal(str(value)):,.2f}"
+    return "R$ " + inteiro.replace(",", "@").replace(".", ",").replace("@", ".")
+
+
+def _quando(due: date, today: date) -> str:
+    """Prazo em linguagem natural. "amanhã" comunica urgência melhor que
+    "08/08", que exige o usuário lembrar que dia é hoje."""
+    dias = (due - today).days
+    if dias <= 0:
+        return "hoje"
+    if dias == 1:
+        return "amanhã"
+    return f"em {due.strftime('%d/%m')}"
+
+
+def _rotulo(title: str) -> str:
+    """"Fatura Nubank — 08/2026" -> "Fatura Nubank".
+
+    A competência é ruído numa notificação sobre algo que vence agora, e come
+    o espaço que o iOS reserva para a prévia.
+    """
+    return title.split(" — ")[0].strip() or title
+
+
+def build_notification(upcoming: List[Payable], today: date) -> dict:
+    """Monta título e corpo do push.
+
+    Função pura para poder ser testada sem tocar em rede nem em banco.
+
+    O texto anterior ("Você tem 2 conta(s) vencendo em breve: ...") não dizia
+    **quanto** nem **quando** — as notificações dos próprios bancos, na mesma
+    tela de bloqueio, trazem valor e data. Sem isso o usuário precisa abrir o
+    app para saber se aquilo é urgente.
+
+    O título também não repete "LifeOS": o iOS já exibe o nome do app acima da
+    mensagem, então prefixá-lo aparecia duas vezes.
+    """
+    total = sum(Decimal(str(p.amount)) for p in upcoming)
+
+    if len(upcoming) == 1:
+        conta = upcoming[0]
+        return {
+            "title": f"{_rotulo(conta.title)} vence {_quando(conta.due_date, today)}",
+            "body": _brl(conta.amount),
+        }
+
+    detalhes = ", ".join(
+        f"{_rotulo(p.title)} ({_quando(p.due_date, today)})" for p in upcoming[:3]
+    )
+    if len(upcoming) > 3:
+        detalhes += f" e mais {len(upcoming) - 3}"
+
+    return {
+        "title": f"{len(upcoming)} contas vencendo",
+        "body": f"{_brl(total)} no total · {detalhes}",
+    }
+
+
 def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> int:
     """
     Sends push notifications for upcoming payables.
@@ -97,9 +157,7 @@ def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> in
         select(PushSubscription).where(PushSubscription.user_id == user_id)
     ).scalars().all()
 
-    titles = [p.title for p in upcoming[:3]]
-    body = f"Você tem {len(upcoming)} conta(s) vencendo em breve: {', '.join(titles)}"
-    payload_data = json.dumps({"title": "LifeOS — Contas Vencendo", "body": body})
+    payload_data = json.dumps(build_notification(upcoming, today))
 
     if not subscriptions:
         _log(f"nenhum device inscrito para o usuário {user_id} — push não enviado")
