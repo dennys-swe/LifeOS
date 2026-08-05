@@ -80,6 +80,20 @@ def get_transaction(db: Session, user_id: UUID, transaction_id: UUID) -> Optiona
     ).scalar_one_or_none()
 
 
+def update_transaction(db: Session, transaction: Transaction, changes: dict) -> Transaction:
+    """Aplica só os campos que vieram no PATCH.
+
+    `category_id=None` é uma limpeza legítima ("sem categoria"), então o
+    filtro é pela presença da chave, não pelo valor.
+    """
+    for field, value in changes.items():
+        setattr(transaction, field, value)
+    db.add(transaction)
+    db.commit()
+    db.refresh(transaction)
+    return transaction
+
+
 def delete_transaction(db: Session, transaction: Transaction) -> None:
     db.delete(transaction)
     db.commit()

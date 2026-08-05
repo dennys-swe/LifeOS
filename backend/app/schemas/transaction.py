@@ -23,6 +23,22 @@ class TransactionCreate(TransactionBase):
     pass
 
 
+class TransactionUpdate(BaseModel):
+    """Edição pontual de uma transação importada.
+
+    Só expõe o que o usuário corrige na tela — a categorização automática
+    (regras + mapa da Pluggy) erra em lançamento novo, e `is_transfer` decide
+    se o valor entra nos totais de gasto. Data, valor e descrição vêm do banco
+    e não devem ser reescritos à mão.
+
+    Todos os campos são opcionais e o PATCH usa `exclude_unset`: mandar só a
+    categoria não pode alterar `is_transfer` sem querer.
+    """
+
+    category_id: Optional[UUID] = None
+    is_transfer: Optional[bool] = None
+
+
 class TransactionResponse(TransactionBase):
     model_config = ConfigDict(from_attributes=True)
 

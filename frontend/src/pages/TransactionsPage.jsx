@@ -14,14 +14,76 @@ const TYPE_FILTERS = [
   { key: "TRANSFERS", label: "Transferências" },
 ];
 
+function CategoryPicker({ categories, current, onPick, onClose }) {
+  return (
+    <>
+      {/* Clique fora fecha — sem isso a lista só sairia ao escolher. */}
+      <button
+        type="button"
+        aria-label="Fechar seletor de categoria"
+        className="fixed inset-0 z-40 cursor-default"
+        onClick={onClose}
+      />
+      <div className="absolute left-0 top-6 z-50 max-h-64 w-52 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+        {categories.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onPick(c.id)}
+            className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs font-semibold transition hover:bg-slate-100 dark:hover:bg-slate-800 ${
+              current === c.id ? "bg-slate-100 dark:bg-slate-800" : ""
+            }`}
+          >
+            <span
+              className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+              style={{ backgroundColor: c.color_hex }}
+            />
+            <span className="truncate text-slate-700 dark:text-slate-200">{c.name}</span>
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onPick(null)}
+          className="mt-1 flex w-full items-center gap-2 rounded-xl border-t border-slate-100 px-2.5 py-1.5 pt-2 text-left text-xs font-semibold text-slate-500 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-slate-300 dark:bg-slate-600" />
+          Sem categoria
+        </button>
+      </div>
+    </>
+  );
+}
+
 export default function TransactionsPage({ month, year, onMonthChange }) {
-  const { categories } = useFinance() ?? {};
+  const { categories, refresh } = useFinance() ?? {};
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [hideTransfers, setHideTransfers] = useState(false);
   const [error, setError] = useState("");
+  const [categoryPickerTxId, setCategoryPickerTxId] = useState(null);
+
+  const handlePickCategory = async (tx, categoryId) => {
+    setCategoryPickerTxId(null);
+    if (categoryId === (tx.category_id ?? null)) return;
+
+    const previous = tx.category_id ?? null;
+    setTransactions((prev) =>
+      prev.map((t) => (t.id === tx.id ? { ...t, category_id: categoryId } : t))
+    );
+
+    try {
+      await api.patch(`/transactions/${tx.id}`, { category_id: categoryId });
+      // O gasto por categoria do dashboard vem do /summary, que precisa recontar.
+      refresh?.();
+    } catch {
+      setTransactions((prev) =>
+        prev.map((t) => (t.id === tx.id ? { ...t, category_id: previous } : t))
+      );
+      setError("Não foi possível alterar a categoria.");
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -44,6 +106,14 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
   const categoryMap = useMemo(() => {
     return new Map((categories ?? []).map((c) => [c.id, c]));
   }, [categories]);
+
+  // Entrada só recebe categoria de receita e saída só de despesa — oferecer as
+  // duas listas juntas deixaria "Salário" a um clique de virar gasto.
+  const categoriesFor = (tx) => {
+    const wanted = tx.type === "INCOME" ? "INCOME" : "EXPENSE";
+    // `kind` ausente = backend antigo; nesse caso não dá para filtrar.
+    return (categories ?? []).filter((c) => !c.kind || c.kind === wanted);
+  };
 
   const filtered = useMemo(() => {
     let list = transactions;
@@ -209,14 +279,37 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
 
                       <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
                         <span>{formatDate(t.date)}</span>
-                        {cat && (
-                          <span
-                            className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
-                            style={{ color: cat.color_hex, backgroundColor: `${cat.color_hex}15` }}
+
+                        <span className="relative">
+                          <button
+                            type="button"
+                            title="Clique para trocar a categoria"
+                            onClick={() =>
+                              setCategoryPickerTxId(categoryPickerTxId === t.id ? null : t.id)
+                            }
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition hover:brightness-95 ${
+                              cat
+                                ? ""
+                                : "border border-dashed border-slate-300 text-slate-400 hover:border-emerald-500 hover:text-emerald-600 dark:border-slate-700 dark:text-slate-500"
+                            }`}
+                            style={
+                              cat
+                                ? { color: cat.color_hex, backgroundColor: `${cat.color_hex}15` }
+                                : undefined
+                            }
                           >
-                            {cat.name}
-                          </span>
-                        )}
+                            {cat ? cat.name : "+ categoria"}
+                          </button>
+                          {categoryPickerTxId === t.id && (
+                            <CategoryPicker
+                              categories={categoriesFor(t)}
+                              current={t.category_id ?? null}
+                              onPick={(id) => handlePickCategory(t, id)}
+                              onClose={() => setCategoryPickerTxId(null)}
+                            />
+                          )}
+                        </span>
+
                         {t.external_category && !cat && (
                           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                             {t.external_category}

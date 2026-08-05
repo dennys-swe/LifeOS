@@ -5,18 +5,21 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.users import current_active_user
 from app.db.database import get_db
+from app.models.category import Category
 from app.models.transaction import TransactionType
 from app.models.user import User
-from app.schemas.transaction import TransactionCreate, TransactionResponse
+from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate
 from app.services.transaction_service import (
     create_transaction,
     delete_transaction,
     get_transaction,
     get_transactions,
+    update_transaction,
 )
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
@@ -60,6 +63,36 @@ def list_transactions(
         limit=limit,
         offset=offset,
     )
+
+
+@router.patch("/{transaction_id}", response_model=TransactionResponse)
+def update_transaction_fields(
+    transaction_id: UUID,
+    payload: TransactionUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user),
+):
+    transaction = get_transaction(db, user.id, transaction_id)
+    if transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="Nada para atualizar.")
+
+    # Sem isso daria para mover a transação para a categoria de outro usuário —
+    # `category_id` é um UUID vindo do cliente, não uma escolha confiável.
+    category_id = changes.get("category_id")
+    if category_id is not None:
+        owned = db.execute(
+            select(Category).where(
+                Category.id == category_id, Category.user_id == user.id
+            )
+        ).scalar_one_or_none()
+        if owned is None:
+            raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+
+    return update_transaction(db, transaction, changes)
 
 
 @router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
