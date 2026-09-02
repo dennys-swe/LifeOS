@@ -1,129 +1,160 @@
-# LifeOS — Gestão Financeira Pessoal
+# LifeOS — Personal Finance Manager
 
-> **SaaS Multi-tenant de Gestão Financeira Pessoal** focado em responder à pergunta *"Pra onde vai meu dinheiro?"*, combinando sincronização bancária real via Open Finance (Pluggy), controle de contas a pagar, conciliação inteligente e analytics com insights comparativos mês a mês.
+> Multi-tenant personal finance SaaS built to answer one question: **"Where is my money going?"**
+> It connects to real bank accounts through Open Finance (Pluggy), tracks bills and credit-card
+> invoices, reconciles transactions automatically, and surfaces month-over-month insights.
+
+**Stack:** Python · FastAPI · SQLAlchemy 2.0 · PostgreSQL · React 19 · Vite · Tailwind CSS v4
+**Live:** backend on Render · frontend on Vercel · database on Neon · ~255 automated tests (pytest)
 
 ---
 
-## 🚀 Visão Geral
+## Screenshots
 
-O **LifeOS** evoluiu de um gerenciador manual de checklist de contas a pagar para um ecossistema completo de inteligência financeira. Ele se conecta às suas contas bancárias reais (Itaú, Nubank, Inter e outros) através da **Pluggy API**, unificando extratos, faturas de cartão de crédito e despesas recorrentes em um dashboard visual rico, rápido e mobile-first.
+<!--
+Add real screenshots here. Easiest way:
+1. Run the app (see "Running locally") or open the deployed version.
+2. Take 2–3 screenshots (dashboard, bills page, bank connection).
+3. Drag them into a GitHub issue comment to get hosted URLs, or commit them to docs/img/.
+4. Replace the lines below.
+-->
+
+| Dashboard | Bills | Bank sync |
+| :---: | :---: | :---: |
+| _screenshot pending_ | _screenshot pending_ | _screenshot pending_ |
 
 ---
 
-## 🛠️ Arquitetura & Stack Tecnológica
+## Overview
 
-| Camada | Tecnologia | Hospedagem / Infra |
+LifeOS started as a manual bill-payment checklist and grew into a full personal-finance engine.
+It links to real bank accounts (Itaú, Nubank, Inter and others) through the **Pluggy API**, then
+unifies statements, credit-card invoices and recurring expenses into a single mobile-first dashboard.
+
+Each user signs up, connects their own banks, and only ever sees their own data.
+
+---
+
+## Architecture
+
+FastAPI layered backend: **Router → Service → SQLAlchemy ORM → PostgreSQL**.
+
+| Layer | Technology | Hosting |
 | :--- | :--- | :--- |
-| **Database** | PostgreSQL Serverless (SQLAlchemy 2.0 + Alembic) | [Neon.tech](https://neon.tech) |
-| **Backend** | Python (FastAPI + Pydantic v2 + `fastapi-users` JWT) | [Render](https://render.com) |
-| **Frontend** | React 19 + Vite + Tailwind CSS v4 + Recharts | [Vercel](https://vercel.com) |
-| **Open Finance** | Pluggy API (OAuth / Proxy MeuPluggy) | Open Finance BR |
-| **Monitoring** | Health check HEAD/GET `/` | UptimeRobot |
+| Database | PostgreSQL (SQLAlchemy 2.0 + Alembic) | Neon |
+| Backend | Python 3.11 · FastAPI · Pydantic v2 · `fastapi-users` (JWT) | Render |
+| Frontend | React 19 · Vite · Tailwind CSS v4 · Recharts · react-router | Vercel |
+| Open Finance | Pluggy API (OAuth via MeuPluggy proxy) | Open Finance BR |
+| Uptime | `HEAD /` health check | UptimeRobot |
+
+- **Multi-tenancy:** every data table carries a `user_id` FK; every service function filters by it.
+  No `select(Model)` runs without `.where(Model.user_id == user_id)`.
+- **Auth:** JWT bearer tokens via `fastapi-users`, with a custom sync SQLAlchemy adapter.
+- **Tests:** pytest against in-memory SQLite — no external database needed to run the suite.
 
 ---
 
-## ✨ Principais Funcionalidades
+## Key features
 
-### 🏦 Open Finance & Sincronização Bancária (Pluggy)
-- **Integração Real**: Conexão com instituições bancárias via conector **MeuPluggy** (permitindo uso pessoal sem custos de licença comercial).
-- **Extrato & Faturas**: Sincronização automática de transações de conta corrente e faturas de cartão de crédito.
-- **Fatura Aberta vs Fechada**: A Bills API só publica a fatura depois do fechamento — atraso que varia por banco. O ciclo em aberto é **reconstruído das transações** (`billForecastDate`, parcelas projetadas, conversão de moeda) e exibido com selo *Aberta*, virando *Fechada* com o valor oficial quando o banco publica.
-- **Janela de Payables**: Algoritmo que filtra e gera obrigações a pagar apenas para faturas no mês atual ou seguinte (`is_in_payable_window`), evitando poluição com projeções futuras distantes ou faturas antigas.
+### Open Finance & bank sync (Pluggy)
+- Real bank connections through the **MeuPluggy** connector (personal use, no commercial license).
+- Automatic sync of checking-account transactions and credit-card invoices.
+- **Open vs. closed invoices:** the Bills API only publishes an invoice after it closes, and the
+  delay varies per bank. The open cycle is *rebuilt from transactions* (forecast date, projected
+  installments, currency conversion) and flagged as *Open*, then replaced by the official value.
+- **Payable window:** only invoices due this month or next become payables, keeping far-future
+  installment projections and stale invoices out of the list.
 
-### 📊 Dashboard Inteligente & Insights
-- **Herói de Gasto Mensal**: Visualização do gasto total do mês com comparativo percentual (delta) em relação ao mês anterior.
-- **Faixa de Insights**: Regras automáticas (`GET /insights`) que identificam variações atípicas em categorias, maiores gastos do mês, ritmo de despesas e alertas de orçamento perto do limite ou estourado.
-- **Gráficos de Tendência & Drill-Down**: Série temporal via Recharts e navegabilidade por categoria (`/categoria/:id`) para inspecionar cada transação que compõe os totais.
-- **Personalização de Cartão**: Apelido e cor definidos por cartão (não por fatura), propagados a todas as faturas do mesmo cartão e herdados pelas próximas sincronizações.
+### Dashboard & insights
+- Monthly spending hero with a percentage delta vs. the previous month.
+- Rule-based insight feed (`GET /insights`): category spikes, biggest expenses, spending pace,
+  budget-near-limit and over-budget alerts.
+- Recharts trend series with per-category drill-down to the individual transactions behind a total.
+- Per-card nickname and color, inherited by every invoice of that card and by future syncs.
 
-### 🤝 Conciliação Bancária & Classificação
-- **Scoring de Confiança**: Cruzamento entre transações do extrato e contas a pagar pendentes. O **valor precisa bater exato** (score 1.0 com a data no vencimento, 0.8 dentro de ±7 dias); a antiga tolerância de ±5% comprava 4 acertos a mais em 91 casos reais e, em troca, sugeria falso positivo em quase toda linha. Auto-conciliação apenas para matches únicos exatos.
-- **Mapeamento de Categorias**: Conversão das categorias da Pluggy para as 16 categorias padrão do usuário (12 de gasto + 4 de receita). O mapeamento é **direcional**: a mesma categoria da Pluggy significa coisas opostas conforme o dinheiro entra ou sai (PIX enviado é gasto, recebido é receita).
-- **Regras por Palavra-chave**: Override do usuário sobre a classificação automática, aplicado **também ao histórico** no momento em que a regra é criada — não só às importações futuras.
-- **Correção Manual**: A categoria de qualquer lançamento pode ser trocada direto no extrato, oferecendo apenas categorias compatíveis com a direção do dinheiro.
-- **Tratamento de Transferências (`is_transfer`)**: Identificação automática de movimentações entre contas próprias, aportes e quitações de fatura. Elas são isoladas dos totais de gasto para evitar contagem dupla.
+### Reconciliation & categorization
+- **Confidence scoring** between statement transactions and pending payables. The amount must
+  match exactly (1.0 on the due date, 0.8 within ±7 days). Auto-reconciliation only fires for
+  unique exact matches.
+- **Directional category mapping:** the same Pluggy category means opposite things depending on
+  whether money comes in or goes out (PIX sent is an expense, PIX received is income).
+- **Keyword rules** that also apply retroactively to history the moment the rule is created.
+- **Transfer handling (`is_transfer`):** money moving between your own accounts, investments and
+  invoice payments is isolated from spending totals to avoid double counting.
 
-### 🗓️ Contas a Pagar (`Payables`) & Recorrentes
-- **Gestão de Contas**: Controle de status (Pendentes, Pagas, Atrasadas) com exclusão otimista e desfazer (*undo*) via toast.
-- **Origem da Conta**: Cada obrigação sabe de onde veio (fatura, recorrente ou manual). Fatura não é editável nem removível — o sync sobrescreve; recorrente é editável, porque água e energia mudam de valor todo mês.
-- **Templates Recorrentes**: Geração automática de obrigações mensais a partir de modelos pré-configurados sem duplicação.
-- **Detecção Automática**: Sugestão automática de novos templates recorrentes com base no histórico do extrato.
+### Bills & recurring
+- Status tracking (pending, paid, overdue) with optimistic delete and toast-based undo.
+- Each payable knows its origin (invoice, recurring template, or manual) and adjusts which
+  actions it offers accordingly.
+- Recurring templates generate monthly obligations without duplication; new templates are
+  suggested automatically from statement history.
 
-### 🔐 Multi-Tenancy & Segurança
-- Autenticação JWT via `fastapi-users`.
-- Isolamento rigoroso de dados em nível de banco de dados (`user_id` em todas as tabelas e rotas).
-
-### 🔔 PWA & Notificações
-- PWA instalável em iOS e Android com Service Workers configurados.
-- Notificações Push nativas (VAPID) para contas a vencer em breve.
+### PWA & notifications
+- Installable PWA on iOS and Android with service workers.
+- Native push notifications (VAPID) for bills coming due.
 
 ---
 
-## 📊 Modelagem de Dados
+## Data model
 
-| Modelo | Descrição |
+| Model | Purpose |
 | :--- | :--- |
-| `User` | Conta de usuário (`fastapi-users`): e-mail, senha criptografada e status |
-| `Payable` | Conta a pagar individual (`user_id`, FKs para `recurring_payable_id` e `transaction_id`) |
-| `RecurringPayable` | Template de recorrência mensal (título, valor, dia do mês) |
-| `Transaction` | Transação de extrato bancário ou importada (`is_transfer`, `external_category`) |
-| `CreditCardBill` | Fatura de cartão. `status` (`OPEN`/`CLOSED`), apelido e cor personalizados por cartão |
-| `Category` | Categoria com cor (`color_hex`) e tipo `kind` (`EXPENSE`/`INCOME`) por usuário |
-| `CategoryRule` | Regra de categorização por palavra-chave e prioridade |
-| `Budget` | Orçamento mensal por categoria (`month`, `year`, `amount`) |
-| `BankAccount` | Conta/Conexão bancária conectada via Pluggy |
-| `PushSubscription` | Inscrição VAPID para envio de push notifications no dispositivo |
+| `User` | Account (`fastapi-users`): email, hashed password, status |
+| `Payable` | A single bill; FKs to `recurring_payable_id` and `transaction_id` |
+| `RecurringPayable` | Monthly recurrence template (title, amount, day of month) |
+| `Transaction` | Bank statement or imported transaction (`is_transfer`, `external_category`) |
+| `CreditCardBill` | Invoice with `OPEN`/`CLOSED` status, per-card nickname and color |
+| `Category` | Category with color and `kind` (`EXPENSE`/`INCOME`), per user |
+| `CategoryRule` | Keyword categorization rule with priority |
+| `Budget` | Monthly per-category budget |
+| `BankAccount` | Bank connection via Pluggy |
+| `PushSubscription` | VAPID subscription for push notifications |
 
 ---
 
-## ⚡ Destaques de Engenharia
+## Engineering notes
 
-- **Timezone Safety**: Datas trafegam e são manipuladas estritamente como strings `YYYY-MM-DD` (evitando bugs de deslocamento por fuso horário/GMT offset).
-- **Isolamento de Transferências**: Transações marcadas como `is_transfer` são filtradas dos cálculos, prevenindo que o pagamento de fatura duplique os gastos já contabilizados no cartão. A detecção não confia só na categoria da Pluggy — ela rotula parte das quitações como `Transfers` genérico, então a descrição também é verificada.
-- **High Availability & Warmup**: Rota raiz responde a requisições `HEAD` mantendo o container no Render ativo via UptimeRobot e eliminando *cold starts*.
-- **Suíte de Testes Leve**: Testes automatizados executam usando SQLite em memória via Pytest, sem necessidade de dependência de banco externo.
+- **Timezone safety:** dates travel and are stored strictly as `YYYY-MM-DD` strings; `new Date(str)`
+  is never used on the frontend (GMT offset shifts the day).
+- **Transfer isolation:** detection checks both the Pluggy category *and* the description — in real
+  data, 13 invoice payments arrived as a generic `Transfers` category and were double-counting
+  ~6% of monthly spending.
+- **Transaction type comes from Pluggy's `type` field, never the amount sign** — on credit cards a
+  purchase arrives positive, so sign-based inference flipped more than half of real transactions.
+- **Warmup:** the root route answers `HEAD` requests so UptimeRobot keeps the Render container warm
+  and eliminates cold starts.
 
 ---
 
-## 🚀 Como Rodar Localmente
+## Running locally
 
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-
-### Backend
+**Prerequisites:** Python 3.11+, Node.js 18+
 
 ```bash
+# Backend
 cd backend
-cp .env.example .env          # Configurar DATABASE_URL, SECRET_KEY, PLUGGY credentials, etc.
+cp .env.example .env          # set DATABASE_URL, SECRET_KEY, Pluggy credentials, VAPID keys
 pip install -r requirements.txt
-alembic upgrade head          # Aplicar migrations
+alembic upgrade head
 uvicorn app.main:app --reload
-```
 
-### Frontend
-
-```bash
+# Frontend
 cd frontend
 npm install
-npm run dev                   # Servidor de desenvolvimento rodando em http://localhost:5173
-```
+npm run dev                   # http://localhost:5173
 
-### Testes
-
-```bash
-cd backend && pytest          # Executa 245 testes unitários/integração em SQLite
-cd frontend && npm test       # Executa testes unitários do frontend
+# Tests
+cd backend && pytest          # ~255 tests on in-memory SQLite
+cd frontend && npm test
 ```
 
 ---
 
-## 📚 Documentação Complementar
+## Further documentation
 
-- **[CLAUDE.md](./CLAUDE.md)**: Guia completo de arquitetura, padrões de código, instruções para IA, rotinas de deploy e regras de negócio detalhadas.
-- **[BACKLOG.md](./BACKLOG.md)**: Pendências abertas — o que ainda não existe, com o porquê e como resolver.
+- **[CLAUDE.md](./CLAUDE.md)** — full architecture, code conventions, deploy routines and business rules.
+- **[BACKLOG.md](./BACKLOG.md)** — open items, with the reasoning behind each.
 
 ---
 
-*Desenvolvido por Dennys Alves — Última atualização: agosto de 2026*
-
+*Built by Dennys Alves Silva — [linkedin.com/in/dennysdev](https://linkedin.com/in/dennysdev) · [github.com/dennys-swe](https://github.com/dennys-swe)*
