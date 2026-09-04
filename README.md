@@ -11,17 +11,9 @@
 
 ## Screenshots
 
-<!--
-Add real screenshots here. Easiest way:
-1. Run the app (see "Running locally") or open the deployed version.
-2. Take 2–3 screenshots (dashboard, bills page, bank connection).
-3. Drag them into a GitHub issue comment to get hosted URLs, or commit them to docs/img/.
-4. Replace the lines below.
--->
-
 | Dashboard | Bills | Bank sync |
 | :---: | :---: | :---: |
-| _screenshot pending_ | _screenshot pending_ | _screenshot pending_ |
+| ![Dashboard](docs/img/dashboard.png) | ![Bills](docs/img/bills.png) | ![Bank sync](docs/img/bank-sync.png) |
 
 ---
 
