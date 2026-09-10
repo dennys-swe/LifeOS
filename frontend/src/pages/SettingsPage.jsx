@@ -145,6 +145,9 @@ function RulesTab() {
     setRules(res.data ?? []);
   };
 
+  // load() só chama setState depois de um await (fetch da lista de regras) — não
+  // é o setState síncrono em cascata que a regra tenta evitar.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, []);
 
   const handleSubmit = async (e) => {
