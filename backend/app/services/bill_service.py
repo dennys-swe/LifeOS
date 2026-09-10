@@ -241,7 +241,10 @@ def upsert_open_bill(
     bill.synced_at = datetime.now(timezone.utc)
     # A obrigação existe desde que o ciclo abre; o valor é atualizado a cada
     # sync enquanto o payable estiver PENDING, e congela quando a fatura fecha.
-    _sync_payable(db, bill, account)
+    # `today` precisa descer até aqui: a janela acionável é a mesma que decidiu
+    # reconstruir o ciclo, e sem isso um teste que injeta uma data fixa via
+    # `today=` deixa de gerar o payable quando a data real do sistema passa.
+    _sync_payable(db, bill, account, today=today)
     db.commit()
     db.refresh(bill)
     return bill
@@ -287,14 +290,19 @@ def update_bill_customization(
     return bill
 
 
-def _sync_payable(db: Session, bill: CreditCardBill, account: BankAccount) -> None:
+def _sync_payable(
+    db: Session,
+    bill: CreditCardBill,
+    account: BankAccount,
+    today: Optional[date] = None,
+) -> None:
     label = bill.custom_card_name or bill.card_name or account.name
     title = f"Fatura {label} — {bill.due_date.strftime('%m/%Y')}"
 
     if bill.payable_id is None:
         # Só a criação é filtrada: um payable que já existe continua sendo
         # mantido em sincronia mesmo que a fatura tenha saído da janela.
-        if not is_in_payable_window(bill.due_date):
+        if not is_in_payable_window(bill.due_date, today):
             return
 
         payable = Payable(

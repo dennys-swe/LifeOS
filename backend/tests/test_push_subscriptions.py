@@ -38,9 +38,14 @@ def test_save_subscription_reassigns_endpoint_to_new_user(db_session, user, othe
     assert second.user_id == other_user.id
 
 
-def test_send_upcoming_notifications_only_notifies_owner(db_session, user, other_user):
+def test_send_upcoming_notifications_only_notifies_owner(db_session, user, other_user, monkeypatch):
     from datetime import date, timedelta
     from app.models.payable import Payable, PayableStatus
+
+    # other_user não tem nada a vencer, então nenhum webpush é disparado — mas a
+    # função exige VAPID configurado antes de chegar a essa conclusão. Damos um
+    # valor de teste para não depender do .env local (falhava em CI sem ele).
+    monkeypatch.setattr(push_service.settings, "vapid_private_key", "test-vapid-key")
 
     db_session.add(
         Payable(

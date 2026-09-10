@@ -1,5 +1,7 @@
 # LifeOS — Personal Finance Manager
 
+[![CI](https://github.com/dennys-swe/LifeOS/actions/workflows/ci.yml/badge.svg)](https://github.com/dennys-swe/LifeOS/actions/workflows/ci.yml)
+
 > Multi-tenant personal finance SaaS built to answer one question: **"Where is my money going?"**
 > It connects to real bank accounts through Open Finance (Pluggy), tracks bills and credit-card
 > invoices, reconciles transactions automatically, and surfaces month-over-month insights.
