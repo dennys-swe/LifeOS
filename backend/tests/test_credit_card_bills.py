@@ -498,3 +498,41 @@ def test_debug_endpoint_flags_ghost_bill(mock_sdk, mock_client, client, db_sessi
     fantasmas = r.json()["faturas_fantasma"]
     assert len(fantasmas) == 1
     assert fantasmas[0]["cartao"] == "Luiza"
+
+
+@patch("app.api.endpoints.credit_card_bills.get_api_client")
+@patch("app.api.endpoints.credit_card_bills.pluggy_sdk")
+def test_debug_endpoint_reports_bills_and_simulation(mock_sdk, mock_client, client, db_session, user):
+    from app.models.bank_account import BankAccount
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=ctx)
+    ctx.__exit__ = MagicMock(return_value=False)
+    mock_client.return_value = ctx
+
+    pa = SimpleNamespace(id="card-x", type="CREDIT", name="Cartão X", status="ACTIVE")
+    mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pa])
+    # uma fatura já vencida e uma projeção futura
+    bills = {"results": [
+        {"id": "b1", "dueDate": "2026-08-10T00:00:00Z", "totalAmount": 300.0},
+        {"id": "b2", "dueDate": "2027-06-10T00:00:00Z", "totalAmount": 50.0},
+    ]}
+    mock_sdk.BillApi.return_value.bills_list_without_preload_content.return_value = SimpleNamespace(
+        data=json.dumps(bills).encode()
+    )
+    mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = (
+        SimpleNamespace(data=json.dumps({"results": [], "totalPages": 1}).encode())
+    )
+
+    acc = BankAccount(user_id=user.id, name="Conexão", bank_name="MeuPluggy",
+                      account_type="checking", external_id=str(uuid4()))
+    db_session.add(acc)
+    db_session.commit()
+
+    r = client.get("/credit-card-bills/debug")
+    assert r.status_code == 200
+    card = r.json()["cartoes"][0]
+    assert card["conta_pluggy"]["status"] == "ACTIVE"
+    assert len(card["faturas_pluggy"]) == 2
+    assert card["ultima_fatura_fechada"] == "2027-06-10"       # bug atual: pega a projeção
+    assert card["ultima_fatura_ja_vencida"] == "2026-08-10"    # correção
+    assert card["simulado_com_ultima_vencida"]["ultima_fatura_fechada"] == "2026-08-10"

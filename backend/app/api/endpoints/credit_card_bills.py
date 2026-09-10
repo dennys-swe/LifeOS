@@ -94,19 +94,59 @@ def debug_open_bills(
                     ).get("results") or []
                 except Exception:  # noqa: BLE001
                     raw_bills = []
-                closed = sorted(
-                    (b for b in raw_bills if b.get("dueDate")),
-                    key=lambda b: b["dueDate"],
+                bills_by_due = sorted(
+                    (b for b in raw_bills if b.get("dueDate")), key=lambda b: b["dueDate"]
                 )
-                last_closed_due = (
-                    date.fromisoformat(closed[-1]["dueDate"][:10]) if closed else None
+                hoje = date.today()
+                ja_venceram = [
+                    b for b in bills_by_due if date.fromisoformat(b["dueDate"][:10]) <= hoje
+                ]
+                # Escolha atual (bugada): a fatura de data mais alta — pega projeções futuras.
+                atual = (
+                    date.fromisoformat(bills_by_due[-1]["dueDate"][:10]) if bills_by_due else None
                 )
+                # Escolha correta: a última fatura já vencida.
+                corrigida = (
+                    date.fromisoformat(ja_venceram[-1]["dueDate"][:10]) if ja_venceram else None
+                )
+                last_closed_due = atual
+
+                stored_bills = db.execute(
+                    select(CreditCardBill).where(
+                        CreditCardBill.user_id == user.id,
+                        CreditCardBill.pluggy_account_id == pa.id,
+                    ).order_by(CreditCardBill.due_date)
+                ).scalars().all()
 
                 entry: dict = {
                     "conexao": account.name,
                     "cartao": card_name,
                     "pluggy_account_id": pa.id,
+                    "conta_pluggy": {
+                        "status": getattr(pa, "status", None),
+                        "subtype": getattr(pa, "subtype", None),
+                        "number": getattr(pa, "number", None),
+                        "name": getattr(pa, "name", None),
+                    },
+                    "faturas_pluggy": [
+                        {
+                            "dueDate": (b.get("dueDate") or "")[:10],
+                            "totalAmount": b.get("totalAmount"),
+                            "id": b.get("id"),
+                        }
+                        for b in bills_by_due
+                    ],
+                    "faturas_salvas": [
+                        {
+                            "due_date": b.due_date.isoformat(),
+                            "total_amount": str(b.total_amount),
+                            "status": b.status.value,
+                            "external_id": b.external_id,
+                        }
+                        for b in stored_bills
+                    ],
                     "ultima_fatura_fechada": last_closed_due.isoformat() if last_closed_due else None,
+                    "ultima_fatura_ja_vencida": corrigida.isoformat() if corrigida else None,
                 }
 
                 if last_closed_due is None:
@@ -114,9 +154,20 @@ def debug_open_bills(
                     out.append(entry)
                     continue
 
-                target_due = next_due_date(last_closed_due, date.today())
                 transactions = _raw_transactions(tx_api, pa.id)
+                target_due = next_due_date(last_closed_due, hoje)
                 explained = explain_open_bill_amount(transactions, target_due, last_closed_due)
+
+                # E se a "última fechada" fosse a última já vencida?
+                simulado = None
+                if corrigida and corrigida != last_closed_due:
+                    alt_target = next_due_date(corrigida, hoje)
+                    alt = explain_open_bill_amount(transactions, alt_target, corrigida)
+                    simulado = {
+                        "ultima_fatura_fechada": corrigida.isoformat(),
+                        "vencimento_alvo": alt_target.isoformat(),
+                        "total_calculado": str(alt["total"]),
+                    }
 
                 salvo = saldo.get(pa.id)
                 payable = db.get(Payable, salvo.payable_id) if salvo and salvo.payable_id else None
@@ -130,6 +181,7 @@ def debug_open_bills(
                             if payable
                             else None
                         ),
+                        "simulado_com_ultima_vencida": simulado,
                         "linhas": explained["linhas"],
                     }
                 )
