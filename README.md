@@ -151,4 +151,16 @@ cd frontend && npm test
 
 ---
 
+## License
+
+Copyright (C) 2026 Dennys Alves Silva
+
+Licensed under the **GNU Affero General Public License v3.0** — see [LICENSE](./LICENSE).
+
+The AGPL is a strong copyleft license: anyone may study, run and modify this code,
+but any modified version that is run as a network service must make its full source
+available under the same terms.
+
+---
+
 *Built by Dennys Alves Silva — [linkedin.com/in/dennysdev](https://linkedin.com/in/dennysdev) · [github.com/dennys-swe](https://github.com/dennys-swe)*
