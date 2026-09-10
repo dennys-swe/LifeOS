@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import sys
+import logging
 from datetime import date
 from typing import Optional
 
@@ -22,8 +22,7 @@ Falhas em um usuário não derrubam o job inteiro.
 """
 
 
-def _log(message: str) -> None:
-    print(f"[daily_sync] {message}", file=sys.stderr)
+logger = logging.getLogger(__name__)
 
 
 def run(db: Optional[Session] = None) -> dict:
@@ -40,6 +39,7 @@ def run(db: Optional[Session] = None) -> dict:
             select(User).where(User.is_active == True)  # noqa: E712
         ).scalars().all()
         today = date.today()
+        logger.info("daily_sync iniciado: %s usuário(s) ativo(s)", len(users))
 
         for user in users:
             processed_users += 1
@@ -57,27 +57,38 @@ def run(db: Optional[Session] = None) -> dict:
                     synced_accounts += 1
                 except Exception as exc:  # noqa: BLE001
                     errors += 1
-                    _log(f"sync falhou (user={user.id} account={account.id}): {exc}")
+                    logger.exception(
+                        "sync falhou (user=%s account=%s): %s", user.id, account.id, exc
+                    )
 
             try:
                 recurring_service.generate_for_month(db, user.id, month=today.month, year=today.year)
             except Exception as exc:  # noqa: BLE001
                 errors += 1
-                _log(f"generate_for_month falhou (user={user.id}): {exc}")
+                logger.exception("generate_for_month falhou (user=%s): %s", user.id, exc)
 
             try:
                 push_service.send_upcoming_notifications(db, user.id, days=3)
             except Exception as exc:  # noqa: BLE001
                 errors += 1
-                _log(f"push falhou (user={user.id}): {exc}")
+                logger.exception("push falhou (user=%s): %s", user.id, exc)
 
     finally:
         if owns_session:
             db.close()
 
-    return {"processed_users": processed_users, "synced_accounts": synced_accounts, "errors": errors}
+    result = {
+        "processed_users": processed_users,
+        "synced_accounts": synced_accounts,
+        "errors": errors,
+    }
+    logger.info("daily_sync concluído: %s", result)
+    return result
 
 
 if __name__ == "__main__":
-    result = run()
-    _log(f"concluído: {result}")
+    from app.core.observability import configure_logging, init_sentry
+
+    configure_logging()
+    init_sentry()
+    run()

@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     cron_secret: str | None = None
 
+    # Observabilidade. Sem SENTRY_DSN o Sentry fica desligado (dev e testes).
+    sentry_dsn: str | None = None
+    sentry_environment: str = "production"
+    log_level: str = "INFO"
+
     pluggy_client_id: str | None = None
     pluggy_client_secret: str | None = None
 

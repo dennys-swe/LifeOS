@@ -44,6 +44,8 @@ services:
         sync: false
       - key: VAPID_CLAIMS_EMAIL
         sync: false
+      - key: SENTRY_DSN # opcional — sem ele o Sentry fica desligado
+        sync: false
 
   # Alternativa ao cron: qualquer agendador externo pode chamar
   #   POST https://<backend>/jobs/daily-sync
