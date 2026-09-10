@@ -444,3 +444,57 @@ def test_new_bill_inherits_card_color(db_session, user):
     )
 
     assert later.custom_color_hex == "#7c3aed"
+
+
+def test_explain_open_bill_amount_matches_compute():
+    from datetime import date
+    from app.services.open_bill_service import compute_open_bill_amount, explain_open_bill_amount
+
+    txs = [
+        {"description": "MERCADO", "amount": 100, "date": "2026-07-20T00:00:00Z",
+         "status": "PENDING", "creditCardMetadata": {"billForecastDate": "2026-08"}},
+        {"description": "PAGAMENTO FATURA", "amount": -50, "date": "2026-07-12T00:00:00Z",
+         "status": "PENDING", "creditCardMetadata": {"billForecastDate": "2026-08"}},
+        {"description": "CURSO 2/4", "amount": 40, "date": "2026-06-03T00:00:00Z",
+         "status": "POSTED", "creditCardMetadata": {"billId": "x", "billForecastDate": "2026-06",
+         "installmentNumber": 2, "totalInstallments": 4}},
+    ]
+    target, closed = date(2026, 8, 8), date(2026, 7, 8)
+    explained = explain_open_bill_amount(txs, target, closed)
+
+    assert explained["total"] == compute_open_bill_amount(txs, target, closed)
+    assert explained["target_competencia"] == "2026-08"
+    motivos = {l["descricao"]: (l["contou"], l["motivo"]) for l in explained["linhas"]}
+    assert motivos["MERCADO"][0] is True
+    assert "pagamento de fatura" in motivos["PAGAMENTO FATURA"][1]
+    assert any("projetada" in l["motivo"] for l in explained["linhas"] if l["contou"])
+
+
+@patch("app.api.endpoints.credit_card_bills.get_api_client")
+@patch("app.api.endpoints.credit_card_bills.pluggy_sdk")
+def test_debug_endpoint_flags_ghost_bill(mock_sdk, mock_client, client, db_session, user):
+    from app.models.bank_account import BankAccount
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=ctx)
+    ctx.__exit__ = MagicMock(return_value=False)
+    mock_client.return_value = ctx
+    # o item não devolve nenhuma conta de cartão
+    mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[])
+
+    acc = BankAccount(user_id=user.id, name="Itaú+Luiza", bank_name="MeuPluggy",
+                      account_type="checking", external_id=str(uuid4()))
+    db_session.add(acc)
+    db_session.flush()
+    ghost = CreditCardBill(
+        user_id=user.id, bank_account_id=acc.id, pluggy_account_id="luiza-cancelado",
+        external_id="open:luiza", card_name="Luiza", due_date=date.today(),
+        total_amount=Decimal("120.00"), status=CreditCardBillStatus.OPEN,
+    )
+    db_session.add(ghost)
+    db_session.commit()
+
+    r = client.get("/credit-card-bills/debug")
+    assert r.status_code == 200
+    fantasmas = r.json()["faturas_fantasma"]
+    assert len(fantasmas) == 1
+    assert fantasmas[0]["cartao"] == "Luiza"

@@ -149,35 +149,99 @@ def compute_open_bill_amount(
     last_closed_due_date: Optional[date],
 ) -> Decimal:
     """Soma o que deve cair na fatura que vence em `target_due_date`."""
-    transactions = [tx for tx in transactions if not _is_payment(tx)]
+    return explain_open_bill_amount(transactions, target_due_date, last_closed_due_date)["total"]
+
+
+def explain_open_bill_amount(
+    transactions: Iterable[dict],
+    target_due_date: date,
+    last_closed_due_date: Optional[date],
+) -> dict:
+    """Igual a `compute_open_bill_amount`, mas devolve o rastro por transação.
+
+    `{"target_competencia", "total", "linhas": [{descricao, valor, contou, motivo}]}`.
+    Usado no diagnóstico de precisão de fatura por banco (issue #20).
+    """
     target_key = _month_key(target_due_date)
     total = Decimal("0")
+    linhas: list[dict] = []
 
     installments: dict[tuple, list[dict]] = {}
+    singles: list[dict] = []
     for tx in transactions:
+        if _is_payment(tx):
+            linhas.append(_linha(tx, Decimal("0"), False, "pagamento de fatura (excluído)"))
+            continue
         number, count = _installment_parts(tx)
         if number and count and count > 1:
             installments.setdefault(_purchase_key(tx), []).append(tx)
+        else:
+            singles.append(tx)
 
-    # Lançamentos avulsos.
-    for tx in transactions:
-        number, count = _installment_parts(tx)
-        if number and count and count > 1:
-            continue
-        if _bill_month(tx, last_closed_due_date, target_key) == target_key:
-            total += _amount(tx)
+    for tx in singles:
+        bill_month = _bill_month(tx, last_closed_due_date, target_key)
+        if bill_month == target_key:
+            valor = _amount(tx)
+            total += valor
+            linhas.append(_linha(tx, valor, True, "contou (competência do ciclo)"))
+        else:
+            linhas.append(
+                _linha(tx, Decimal("0"), False, f"outra competência ({bill_month or '—'})")
+            )
 
-    # Parcelamentos: conta a parcela deste ciclo se ela já existe, projeta se não.
     for group in installments.values():
-        total += _installment_share(group, last_closed_due_date, target_key)
+        valor, motivo, matched = _installment_detail(group, last_closed_due_date, target_key)
+        total += valor
+        if matched is not None:
+            linhas.append(_linha(matched, valor, True, motivo))
+            for tx in group:
+                if tx is not matched:
+                    linhas.append(_linha(tx, Decimal("0"), False, "outra parcela do parcelamento"))
+        elif valor > 0:
+            base = group[0]
+            linhas.append(_linha(base, valor, True, motivo))
+            for tx in group[1:]:
+                linhas.append(_linha(tx, Decimal("0"), False, "outra parcela do parcelamento"))
+        else:
+            for tx in group:
+                linhas.append(_linha(tx, Decimal("0"), False, motivo))
 
-    return total.quantize(Decimal("0.01"))
+    return {
+        "target_competencia": target_key,
+        "total": total.quantize(Decimal("0.01")),
+        "linhas": linhas,
+    }
+
+
+def _linha(tx: dict, valor: Decimal, contou: bool, motivo: str) -> dict:
+    meta = _metadata(tx)
+    return {
+        "descricao": tx.get("description"),
+        "data": (tx.get("date") or "")[:10],
+        "valor_bruto": str(_amount(tx)),
+        "valor": str(valor.quantize(Decimal("0.01"))),
+        "contou": contou,
+        "motivo": motivo,
+        "billForecastDate": meta.get("billForecastDate"),
+        "parcela": (
+            f"{meta.get('installmentNumber')}/{meta.get('totalInstallments')}"
+            if meta.get("installmentNumber")
+            else None
+        ),
+        "status": tx.get("status"),
+    }
 
 
 def _installment_share(
     group: list[dict], last_closed_due_date: Optional[date], target_key: str
 ) -> Decimal:
-    """Quanto deste parcelamento cai na fatura-alvo.
+    return _installment_detail(group, last_closed_due_date, target_key)[0]
+
+
+def _installment_detail(
+    group: list[dict], last_closed_due_date: Optional[date], target_key: str
+) -> tuple[Decimal, str, Optional[dict]]:
+    """Quanto deste parcelamento cai na fatura-alvo, com o motivo.
 
     Uma parcela reemitida aparece duas vezes (uma já dentro de uma fatura
     fechada, outra pendente) — como as duas resolvem para a mesma competência,
@@ -186,7 +250,7 @@ def _installment_share(
     """
     for tx in group:
         if _bill_month(tx, last_closed_due_date, target_key) == target_key:
-            return _amount(tx)
+            return _amount(tx), "parcela deste ciclo (emitida pelo banco)", tx
 
     # Nenhuma transação para este ciclo: o banco ainda não emitiu a parcela.
     # Projeta a partir da mais recente conhecida, respeitando o total contratado.
@@ -200,15 +264,15 @@ def _installment_share(
             latest, latest_month = tx, month
 
     if latest is None or latest_month is None:
-        return Decimal("0")
+        return Decimal("0"), "parcelamento sem competência resolvível", None
 
     offset = _months_between(latest_month, target_key)
     if offset <= 0:
-        return Decimal("0")
+        return Decimal("0"), "parcelamento não alcança este ciclo", None
     number, count = _installment_parts(latest)
     if number + offset > count:
-        return Decimal("0")
-    return _amount(latest)
+        return Decimal("0"), "parcelamento já quitado neste ciclo", None
+    return _amount(latest), f"parcela {number + offset}/{count} projetada", None
 
 
 def next_due_date(last_closed_due_date: date, today: Optional[date] = None) -> date:
