@@ -42,7 +42,9 @@ PAYMENT_CATEGORY_ID = "05100000"
 # Nem todo pagamento cai na categoria certa: "PAGAMENTO COM SALDO" (Itaú/Luiza)
 # vem como `Transfers`, mesma categoria de créditos legítimos que abatem a
 # fatura ("Encerramento de dívida"). A descrição é o que separa os dois.
-_PAYMENT_DESCRIPTION = re.compile(r"\bPAGAMENTO\b", re.IGNORECASE)
+# Ancorado no início: "PAGAMENTO COM SALDO" / "Pagamento recebido" são quitação;
+# "JUROS PAGAMENTO CONTAS" é encargo e não pode ser excluído da fatura.
+_PAYMENT_DESCRIPTION = re.compile(r"^\s*PAGAMENTO\b", re.IGNORECASE)
 
 # "MERCADINHO SAO LUIZ02/02" / "Expresso Guanabara 1/5" — o número da parcela
 # entra na descrição, então precisa sair para agrupar a mesma compra.

@@ -264,3 +264,11 @@ def test_no_open_bill_when_bank_already_projects_far_ahead(db_session, user):
         [_tx(150, "2026-07-20", forecast="2026-08")],
         today=date(2026, 8, 4),
     ) is None
+
+
+def test_charge_with_pagamento_in_the_middle_is_not_excluded():
+    """"JUROS PAGAMENTO CONTAS" é encargo, não quitação de fatura."""
+    txs = [_tx(0.22, "2026-08-20", forecast="2026-09", description="JUROS PAGAMENTO CONTAS")]
+    assert open_bill_service.compute_open_bill_amount(
+        txs, date(2026, 9, 10), date(2026, 8, 10)
+    ) == Decimal("0.22")
