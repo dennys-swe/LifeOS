@@ -71,9 +71,13 @@ def test_daily_sync_endpoint_rejects_wrong_secret(client):
     assert response.status_code == 403
 
 
-def test_daily_sync_endpoint_accepts_correct_secret(client):
+def test_daily_sync_endpoint_accepts_correct_secret(client, monkeypatch):
+    # O teste controla o próprio segredo — sem isso ele só passava quando havia
+    # um CRON_SECRET no .env local (e falhava em qualquer ambiente limpo, CI
+    # incluído).
+    monkeypatch.setattr(settings, "cron_secret", "test-cron-secret")
     response = client.post(
-        "/jobs/daily-sync", headers={"X-Cron-Secret": settings.cron_secret}
+        "/jobs/daily-sync", headers={"X-Cron-Secret": "test-cron-secret"}
     )
     assert response.status_code == 200
     assert "processed_users" in response.json()
