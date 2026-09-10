@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.models.bank_account import BankAccount
+from app.models.bank_account import BankAccount, BankAccountSyncStatus
 from app.services import bank_sync_service
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
@@ -41,7 +41,7 @@ async def _process_pluggy_event(request: Request, background_tasks: BackgroundTa
             account = db.execute(
                 select(BankAccount).where(BankAccount.external_id == item_id)
             ).scalar_one_or_none()
-            if account is not None and bank_sync_service.can_start_sync(account):
+            if account is not None and account.sync_status != BankAccountSyncStatus.SYNCING:
                 bank_sync_service.start_sync(db, account)
                 background_tasks.add_task(
                     bank_sync_service.run_sync_job, account.id, account.user_id

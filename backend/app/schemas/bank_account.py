@@ -35,6 +35,5 @@ class BankAccountResponse(BaseModel):
     account_type: str
     external_id: Optional[str] = None
     last_sync_at: Optional[datetime] = None
-    sync_started_at: Optional[datetime] = None
     sync_status: BankAccountSyncStatus = BankAccountSyncStatus.IDLE
     last_sync_error: Optional[str] = None

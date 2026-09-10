@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date as date_type
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
@@ -372,27 +372,9 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     }
 
 
-# Um lock SYNCING mais velho que isto é tratado como morto: o job em background
-# não voltou para IDLE/ERROR (no Render free o worker é reciclado e mata a
-# BackgroundTask no meio, principalmente na conexão mais pesada).
-STALE_SYNC_LOCK = timedelta(minutes=15)
-
-
-def can_start_sync(account: BankAccount, *, now: Optional[datetime] = None) -> bool:
-    """Pode disparar um sync para esta conta agora?"""
-    if account.sync_status != BankAccountSyncStatus.SYNCING:
-        return True
-    started = account.sync_started_at
-    now = now or datetime.now(timezone.utc)
-    if started is not None and started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
-    return started is None or (now - started) > STALE_SYNC_LOCK
-
-
 def start_sync(db: Session, account: BankAccount) -> None:
     """Marca a conta como 'sincronizando' — chamado na request antes de agendar o job em background."""
     account.sync_status = BankAccountSyncStatus.SYNCING
-    account.sync_started_at = datetime.now(timezone.utc)
     account.last_sync_error = None
     db.add(account)
     db.commit()

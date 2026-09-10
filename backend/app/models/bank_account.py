@@ -28,10 +28,6 @@ class BankAccount(Base):
     account_type: Mapped[str] = mapped_column(String(20), nullable=False, default="checking")
     external_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Início da sincronização em andamento. Um lock SYNCING mais velho que
-    # STALE_SYNC_LOCK (ver bank_sync_service) é considerado morto — o job em
-    # background morreu (Render free recicla o worker) sem voltar para IDLE.
-    sync_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     sync_status: Mapped[BankAccountSyncStatus] = mapped_column(
         SAEnum(BankAccountSyncStatus, name="bank_account_sync_status"),
         nullable=False,
