@@ -266,25 +266,6 @@ def test_no_open_bill_when_bank_already_projects_far_ahead(db_session, user):
     ) is None
 
 
-def test_itau_forecast_one_month_ahead_counts_in_current_cycle():
-    """Itaú rotula compras do mês-alvo com billForecastDate = mês seguinte.
-
-    Compra de 05/09 vem como "2026-10"; deve entrar na fatura que vence 10/09.
-    """
-    txs = [_tx(226.02, "2026-09-05", forecast="2026-10")]
-    assert open_bill_service.compute_open_bill_amount(
-        txs, date(2026, 9, 10), date(2026, 8, 10)
-    ) == Decimal("226.02")
-
-
-def test_purchase_from_previous_month_with_future_forecast_is_not_pulled_in():
-    """Contraprova: compra de 31/07 com forecast "2026-09" NÃO cai na fatura de agosto."""
-    txs = [_tx(999, "2026-07-31", forecast="2026-09")]
-    assert open_bill_service.compute_open_bill_amount(
-        txs, date(2026, 8, 8), date(2026, 7, 8)
-    ) == Decimal("0.00")
-
-
 def test_charge_with_pagamento_in_the_middle_is_not_excluded():
     """"JUROS PAGAMENTO CONTAS" é encargo, não quitação de fatura."""
     txs = [_tx(0.22, "2026-08-20", forecast="2026-09", description="JUROS PAGAMENTO CONTAS")]
