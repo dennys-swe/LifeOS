@@ -1,0 +1,30 @@
+# Banco de DESENVOLVIMENTO local. Não tem nada a ver com produção — produção
+# roda no Neon, sempre. Este Postgres é descartável: o schema vem do Alembic e
+# os dados do seed (backend/scripts/seed_dev.py). Some quando você desliga a
+# máquina, e tudo bem.
+#
+#   docker compose up -d db
+#   cd backend && ./scripts/dev_bootstrap.sh
+#
+# O `.env` local deve apontar para cá:
+#   DATABASE_URL=postgresql+psycopg2://lifeos:lifeos@localhost:5432/lifeos_dev?sslmode=disable
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: lifeos
+      POSTGRES_PASSWORD: lifeos
+      POSTGRES_DB: lifeos_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - lifeos_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lifeos -d lifeos_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  lifeos_pgdata:
