@@ -122,21 +122,25 @@ def _bill_month(tx: dict, last_closed_due_date: Optional[date], target_key: str)
     settled = bool(meta.get("billId")) or tx.get("status") != "PENDING"
     tx_date = _parse_date(tx.get("date"))
 
-    if forecast and settled:
-        return forecast
-
-    # Rótulo adiantado do Itaú: uma pendência comprada DENTRO do mês-alvo mas
-    # com `billForecastDate` apontando o mês seguinte (compras de 05–07/09
-    # vinham como "2026-10"). A data da compra manda. Não confundir com uma
-    # compra de mês anterior que aponta um ciclo futuro — essa é legítima e o
-    # `_month_key(tx_date) == target_key` a exclui.
+    # Rótulo adiantado do Itaú: uma pendência **não faturada** comprada DENTRO do
+    # mês-alvo mas com `billForecastDate` apontando o mês seguinte (compras de
+    # 05–07/09 vinham como "2026-10"). A data da compra manda. Não confundir com
+    # uma compra de mês anterior que aponta um ciclo futuro — essa é legítima e
+    # o `_month_key(tx_date) == target_key` a exclui.
     if (
-        forecast
+        not settled
+        and forecast
         and tx_date is not None
         and forecast > target_key
         and _month_key(tx_date) == target_key
     ):
         return target_key
+
+    # Lançamento já faturado: a competência dele (a do billId) é definitiva.
+    # `forecast` pode ser None aqui — devolver None mantém o comportamento
+    # anterior (excluído da reconstrução do ciclo aberto).
+    if settled:
+        return forecast
 
     if forecast and forecast >= target_key:
         return forecast
