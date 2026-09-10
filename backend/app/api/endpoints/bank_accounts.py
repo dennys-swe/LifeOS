@@ -102,7 +102,7 @@ def sync_bank_account(
         raise HTTPException(status_code=404, detail="Bank account not found")
     if not account.external_id:
         raise HTTPException(status_code=400, detail="Conta sem item_id da Pluggy. Conecte o banco primeiro.")
-    if account.sync_status == BankAccountSyncStatus.SYNCING:
+    if not bank_sync_service.can_start_sync(account):
         return SyncStartedResponse(sync_status=account.sync_status)
 
     bank_sync_service.start_sync(db, account)
