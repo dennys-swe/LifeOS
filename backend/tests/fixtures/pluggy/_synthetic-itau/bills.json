@@ -1,7 +1,3 @@
 [
-  {
-    "id": "itau-closed-2026-07",
-    "dueDate": "2026-07-10T00:00:00.000Z",
-    "totalAmount": 1187.44
-  }
+  { "id": "itau-closed-2026-08", "dueDate": "2026-08-10T00:00:00Z", "totalAmount": 925.92 }
 ]

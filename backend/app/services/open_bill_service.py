@@ -39,10 +39,12 @@ from typing import Iterable, Optional
 # novo em vez de abater o anterior.
 PAYMENT_CATEGORY_ID = "05100000"
 
+# Ancorado no início: "PAGAMENTO COM SALDO" / "Pagamento recebido" são quitação;
+# "JUROS PAGAMENTO CONTAS" é encargo e não pode ser excluído.
 # Nem todo pagamento cai na categoria certa: "PAGAMENTO COM SALDO" (Itaú/Luiza)
 # vem como `Transfers`, mesma categoria de créditos legítimos que abatem a
 # fatura ("Encerramento de dívida"). A descrição é o que separa os dois.
-_PAYMENT_DESCRIPTION = re.compile(r"\bPAGAMENTO\b", re.IGNORECASE)
+_PAYMENT_DESCRIPTION = re.compile(r"^\s*PAGAMENTO\b", re.IGNORECASE)
 
 # "MERCADINHO SAO LUIZ02/02" / "Expresso Guanabara 1/5" — o número da parcela
 # entra na descrição, então precisa sair para agrupar a mesma compra.
@@ -118,17 +120,33 @@ def _bill_month(tx: dict, last_closed_due_date: Optional[date], target_key: str)
     meta = _metadata(tx)
     forecast = meta.get("billForecastDate")
     settled = bool(meta.get("billId")) or tx.get("status") != "PENDING"
+    tx_date = _parse_date(tx.get("date"))
 
-    if forecast and (settled or forecast >= target_key):
+    if forecast and settled:
         return forecast
-    if settled or last_closed_due_date is None:
+
+    # Rótulo adiantado do Itaú: uma pendência comprada DENTRO do mês-alvo mas
+    # com `billForecastDate` apontando o mês seguinte (compras de 05–07/09
+    # vinham como "2026-10"). A data da compra manda. Não confundir com uma
+    # compra de mês anterior que aponta um ciclo futuro — essa é legítima e o
+    # `_month_key(tx_date) == target_key` a exclui.
+    if (
+        forecast
+        and tx_date is not None
+        and forecast > target_key
+        and _month_key(tx_date) == target_key
+    ):
+        return target_key
+
+    if forecast and forecast >= target_key:
+        return forecast
+    if last_closed_due_date is None:
         return None
 
     # Chegou aqui: pendência não faturada. Ou não declara competência, ou
     # declara uma que já fechou — o Itaú rotula pelo mês da compra, então
     # lançamentos de 15 a 25/07 vinham como "2026-07" com a fatura de julho já
     # paga. Em ambos os casos a cobrança rolou para o ciclo seguinte.
-    tx_date = _parse_date(tx.get("date"))
     if tx_date is None:
         return None
     if forecast and forecast < target_key:

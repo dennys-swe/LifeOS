@@ -3,38 +3,33 @@
     "id": "syn-itau-0001",
     "description": "LOJA A COMPRAS",
     "amount": 800.00,
-    "date": "2026-07-15T03:00:00.000Z",
+    "date": "2026-09-05T03:00:00.000Z",
     "status": "PENDING",
     "type": "DEBIT",
     "category": "Shopping",
-    "creditCardMetadata": {
-      "cardNumber": "9999",
-      "billForecastDate": "2026-08"
-    }
+    "creditCardMetadata": { "cardNumber": "9999", "billForecastDate": "2026-10" }
   },
   {
     "id": "syn-itau-0002",
     "description": "LOJA B SERVICOS",
     "amount": 240.00,
-    "date": "2026-07-28T03:00:00.000Z",
+    "date": "2026-09-06T03:00:00.000Z",
     "status": "PENDING",
     "type": "DEBIT",
     "category": "Services",
-    "creditCardMetadata": {
-      "cardNumber": "9999",
-      "billForecastDate": "2026-08"
-    }
+    "creditCardMetadata": { "cardNumber": "9999", "billForecastDate": "2026-10" }
   },
   {
     "id": "syn-itau-0003",
     "description": "GELADEIRA 3/10",
-    "amount": 300.00,
-    "date": "2026-08-10T03:00:00.000Z",
+    "amount": 60.00,
+    "date": "2026-09-08T03:00:00.000Z",
     "status": "PENDING",
     "type": "DEBIT",
     "category": "Shopping",
     "creditCardMetadata": {
       "cardNumber": "9999",
+      "billForecastDate": "2026-10",
       "installmentNumber": 3,
       "totalInstallments": 10
     }
