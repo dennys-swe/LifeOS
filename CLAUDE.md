@@ -43,6 +43,8 @@ O backend exige um arquivo `backend/.env` com `DATABASE_URL`, `SECRET_KEY` (JWT)
 
 Config central em `app/core/config.py` (`pydantic-settings`) — nunca usar `os.getenv` solto em código novo, sempre `from app.core.config import settings`.
 
+**Observabilidade** (`app/core/observability.py`): `configure_logging()` + `init_sentry()` são chamados no import de `app/main.py` e no `__main__` de `daily_sync.py`. Usar `logging.getLogger(__name__)` nos módulos — **nunca `print`**. `logger.exception(...)` / `logger.error(...)` viram evento no Sentry automaticamente (integração de logging padrão do SDK) quando `SENTRY_DSN` está setado; sem DSN o Sentry é no-op. Nível via `LOG_LEVEL` (padrão `INFO`).
+
 ### Frontend
 
 ```bash
@@ -85,7 +87,7 @@ Camadas FastAPI seguindo o padrão: **Router → Service → SQLAlchemy ORM → 
 - `app/services/pluggy_category_map.py` — mapeia as categorias que a Pluggy atribui (`Groceries`, `Gas stations`, ...) para as categorias padrão do usuário — 55 de despesa e 6 do ramo Income — e define quais são **transferência**. Mapa explícito de propósito: categoria nova que a Pluggy inventar fica sem categoria em vez de ser adivinhada errado, e `Transaction.external_category` guarda o valor cru pra descobrir o que completar.
 - `app/services/bank_sync_service.sync_account` — sincroniza transações (dedup por `(user_id, source="pluggy:{tx_id}")`) e, para contas `type == "CREDIT"`, também as faturas via `bill_service`. Usa `*_without_preload_content` + `json.loads` como workaround de um bug de validação Pydantic do SDK (`CreditCardMetadata.payeeMCC`); o mesmo padrão foi replicado para `BillApi.bills_list_without_preload_content`. Ao final, roda `suggest_reconciliation` + `auto_reconcile_confident_matches` sobre as transações recém-importadas.
 - `app/services/bill_service.py` — upsert de `CreditCardBill` por `(user_id, external_id)` e geração/atualização automática do `Payable` correspondente (nunca atualiza um payable já `PAID`).
-- Faturas só existem em conexões Open Finance Regulado — falha ao buscar degrada para lista vazia (não derruba o sync de transações), mas **loga em stderr** (`[bank_sync] bills indisponíveis ...`). Se a geração automática de `Payable` de fatura parar de acontecer, esse log é o primeiro lugar a olhar.
+- Faturas só existem em conexões Open Finance Regulado — falha ao buscar degrada para lista vazia (não derruba o sync de transações), mas **loga em `WARNING`** (`app.services.bank_sync_service: bills indisponíveis ...`). Se a geração automática de `Payable` de fatura parar de acontecer, esse log é o primeiro lugar a olhar.
 - `app/api/endpoints/webhooks.py` — `POST /webhooks/pluggy` (público, sem auth) dispara `run_sync_job` em background para o item afetado nos eventos `item/created|updated` e `transactions/created|updated`. A URL é registrada no dashboard da Pluggy, não via código (`get_connect_token` não passa `ItemOptions.webhook_url`).
 
 #### Uso pessoal via conector "MeuPluggy" (sem plano comercial)

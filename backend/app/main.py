@@ -15,8 +15,12 @@ from app.api.endpoints.summary import router as summary_router
 from app.api.endpoints.transactions import router as transactions_router
 from app.api.endpoints.webhooks import router as webhooks_router
 from app.core.config import settings
+from app.core.observability import configure_logging, init_sentry
 from app.core.users import auth_backend, fastapi_users
 from app.schemas.user import UserCreate, UserRead, UserUpdate
+
+configure_logging()
+init_sentry()
 
 app = FastAPI(title="Controle Financeiro Pessoal API")
 

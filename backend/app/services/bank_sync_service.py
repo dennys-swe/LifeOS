@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import sys
+import logging
 from datetime import date as date_type
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -29,8 +29,7 @@ from app.services.reconciliation_service import (
 )
 
 
-def _log(message: str) -> None:
-    print(f"[bank_sync] {message}", file=sys.stderr)
+logger = logging.getLogger(__name__)
 
 
 def list_accounts(db: Session, user_id: UUID) -> List[BankAccount]:
@@ -95,7 +94,12 @@ def create_account(db: Session, user_id: UUID, payload: BankAccountCreate) -> Ba
         except Exception as exc:  # noqa: BLE001
             # Nome ruim é bem melhor que falhar a conexão — o usuário pode
             # renomear depois via PATCH.
-            _log(f"não foi possível derivar o nome do item {data['external_id']}: {type(exc).__name__}: {exc}")
+            logger.warning(
+                "não foi possível derivar o nome do item %s: %s",
+                data["external_id"],
+                exc,
+                exc_info=True,
+            )
             derived_name, derived_bank = "Conta bancária", "Desconhecido"
         data["name"] = data.get("name") or derived_name
         data["bank_name"] = data.get("bank_name") or derived_bank
@@ -232,9 +236,11 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                     # sem isso não há como distinguir "conector não expõe faturas"
                     # de um bug nosso, e a geração automática de Payable de fatura
                     # some sem aviso.
-                    _log(
-                        f"bills indisponíveis (account={pluggy_acct.id} card={card_name!r}): "
-                        f"{type(exc).__name__}: {exc}"
+                    logger.warning(
+                        "bills indisponíveis (account=%s card=%r): %s",
+                        pluggy_acct.id,
+                        card_name,
+                        exc,
                     )
                     bills_data = []
 
@@ -339,9 +345,12 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                     # Estimativa é acessório: falhar aqui não pode derrubar o
                     # sync de transações e faturas, que são o dado oficial.
                     db.rollback()
-                    _log(
-                        f"fatura em aberto indisponível (account={pluggy_acct.id} "
-                        f"card={card_name!r}): {type(exc).__name__}: {exc}"
+                    logger.warning(
+                        "fatura em aberto indisponível (account=%s card=%r): %s",
+                        pluggy_acct.id,
+                        card_name,
+                        exc,
+                        exc_info=True,
                     )
 
     account.last_sync_at = datetime.now(timezone.utc)

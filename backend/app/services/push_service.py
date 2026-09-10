@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import sys
+import logging
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import List
@@ -16,8 +16,7 @@ from app.models.push_subscription import PushSubscription
 from app.schemas.push_subscription import PushSubscriptionCreate
 
 
-def _log(message: str) -> None:
-    print(f"[push] {message}", file=sys.stderr)
+logger = logging.getLogger(__name__)
 
 
 def _vapid_key(raw: str):
@@ -164,7 +163,7 @@ def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> in
     payload_data = json.dumps(build_notification(upcoming, today))
 
     if not subscriptions:
-        _log(f"nenhum device inscrito para o usuário {user_id} — push não enviado")
+        logger.info("nenhum device inscrito para o usuário %s — push não enviado", user_id)
         return 0
 
     sent = 0
@@ -186,16 +185,18 @@ def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> in
             # novo todo dia contra um device que não existe mais.
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in (404, 410):
-                _log(f"subscription expirada (HTTP {status}), removendo: {sub.endpoint[:60]}")
+                logger.info(
+                    "subscription expirada (HTTP %s), removendo: %s", status, sub.endpoint[:60]
+                )
                 db.delete(sub)
             else:
-                _log(f"falha ao enviar push (HTTP {status}): {exc}")
+                logger.warning("falha ao enviar push (HTTP %s): %s", status, exc)
         except Exception as exc:  # noqa: BLE001
             # Engolir toda exceção em silêncio deixava o push falhar sem deixar
             # rastro: o job retornava 0 enviados e não havia como distinguir
             # "ninguém inscrito" de "chave errada" ou "serviço fora do ar".
-            _log(f"erro inesperado ao enviar push: {type(exc).__name__}: {exc}")
+            logger.exception("erro inesperado ao enviar push: %s", exc)
 
     db.commit()
-    _log(f"push: {sent}/{len(subscriptions)} enviados para o usuário {user_id}")
+    logger.info("push: %s/%s enviados para o usuário %s", sent, len(subscriptions), user_id)
     return sent
