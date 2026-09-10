@@ -326,14 +326,33 @@ class TestSyncEndpoint:
         assert "item_id" in r.json()["detail"]
 
     def test_sync_already_syncing_is_idempotent(self, client, db_session, user):
+        from datetime import datetime, timezone
+
         acc = _make_account(db_session, user, external_id=str(uuid4()))
         acc.sync_status = BankAccountSyncStatus.SYNCING
+        acc.sync_started_at = datetime.now(timezone.utc)
         db_session.add(acc)
         db_session.commit()
 
         r = client.post(f"/bank-accounts/{acc.id}/sync")
         assert r.status_code == 202
         assert r.json()["sync_status"] == "SYNCING"
+
+    @patch("app.api.endpoints.bank_accounts.bank_sync_service.run_sync_job")
+    def test_sync_breaks_stale_lock(self, mock_job, client, db_session, user):
+        from datetime import datetime, timedelta, timezone
+
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        acc.sync_status = BankAccountSyncStatus.SYNCING
+        acc.sync_started_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        db_session.add(acc)
+        db_session.commit()
+
+        r = client.post(f"/bank-accounts/{acc.id}/sync")
+        assert r.status_code == 202
+        mock_job.assert_called_once()
+        db_session.refresh(acc)
+        assert acc.sync_status == BankAccountSyncStatus.SYNCING  # relançado
 
     @patch("app.api.endpoints.bank_accounts.bank_sync_service.sync_account")
     def test_sync_job_error_sets_error_status(self, mock_sync, client, db_session, user):
