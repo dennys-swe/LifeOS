@@ -40,6 +40,8 @@ services:
         sync: false
       - key: PLUGGY_CLIENT_SECRET
         sync: false
+      - key: PLUGGY_WEBHOOK_SECRET # opcional — segredo no path da webhook
+        sync: false
       - key: VAPID_PRIVATE_KEY
         sync: false
       - key: VAPID_PUBLIC_KEY
@@ -70,6 +72,8 @@ services:
       - key: PLUGGY_CLIENT_ID
         sync: false
       - key: PLUGGY_CLIENT_SECRET
+        sync: false
+      - key: PLUGGY_WEBHOOK_SECRET # opcional — segredo no path da webhook
         sync: false
       - key: VAPID_PRIVATE_KEY
         sync: false
