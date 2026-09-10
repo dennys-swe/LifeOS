@@ -11,13 +11,22 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=_ENV_FILE, case_sensitive=False, extra="ignore")
 
     database_url: str = "postgresql+psycopg2://user:password@localhost:5432/finance_db"
+
+    # Ambiente lógico: "development" | "staging" | "production". Dirige o guard
+    # de banco de produção (ver app/db/database.py) e o environment reportado ao
+    # Sentry. Produção seta ENVIRONMENT=production explicitamente.
+    environment: str = "development"
+    # Escape hatch consciente: permite o backend subir contra um banco gerenciado
+    # (Neon) mesmo fora de production. Para leitura pontual de produção.
+    allow_prod_db: bool = False
+
     secret_key: str = "insecure-dev-secret-change-me"
     cors_origins: str = "http://localhost:5173"
     cron_secret: str | None = None
 
     # Observabilidade. Sem SENTRY_DSN o Sentry fica desligado (dev e testes).
+    # O environment reportado ao Sentry é `self.environment`.
     sentry_dsn: str | None = None
-    sentry_environment: str = "production"
     log_level: str = "INFO"
 
     pluggy_client_id: str | None = None

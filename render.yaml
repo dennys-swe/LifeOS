@@ -28,6 +28,8 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      - key: ENVIRONMENT # production — libera o guard de banco e marca o env no Sentry
+        value: production
       - key: SECRET_KEY
         sync: false
       - key: CORS_ORIGINS
@@ -61,6 +63,8 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      - key: ENVIRONMENT # production — libera o guard de banco e marca o env no Sentry
+        value: production
       - key: SECRET_KEY
         sync: false
       - key: PLUGGY_CLIENT_ID

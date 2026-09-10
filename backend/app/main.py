@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -21,6 +23,8 @@ from app.schemas.user import UserCreate, UserRead, UserUpdate
 
 configure_logging()
 init_sentry()
+
+logging.getLogger(__name__).info("LifeOS API iniciando: environment=%s", settings.environment)
 
 app = FastAPI(title="Controle Financeiro Pessoal API")
 

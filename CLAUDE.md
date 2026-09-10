@@ -13,6 +13,10 @@ Autenticação via **fastapi-users** (JWT Bearer). Contas bancárias e faturas d
 ### Backend
 
 ```bash
+# Ambiente de dev do zero (banco local descartável, migrations, seed)
+docker compose up -d db                 # na raiz do repo — Postgres de dev
+cd backend && ./scripts/dev_bootstrap.sh
+
 # Servidor de desenvolvimento
 uvicorn app.main:app --reload
 
@@ -35,11 +39,13 @@ cd backend && alembic revision -m "descricao"  # escrever à mão; ver nota de m
 cd backend && python -m app.jobs.daily_sync
 ```
 
-O backend exige um arquivo `backend/.env` com `DATABASE_URL`, `SECRET_KEY` (JWT), `CORS_ORIGINS`, `CRON_SECRET`, `PLUGGY_CLIENT_ID`/`PLUGGY_CLIENT_SECRET` e as chaves VAPID (ver `.env.example`). Testes usam SQLite em memória — sem necessidade de banco real, e não passam pelo Alembic (schema vem direto dos models via `Base.metadata.create_all`).
+O backend exige um arquivo `backend/.env` (ver `.env.example` — dividido em seção dev e referência de prod). Chaves: `DATABASE_URL`, `ENVIRONMENT` (`development`/`staging`/`production`), `SECRET_KEY` (JWT), `CORS_ORIGINS`, `CRON_SECRET`, `PLUGGY_CLIENT_ID`/`PLUGGY_CLIENT_SECRET`, chaves VAPID, `SENTRY_DSN` (opcional). Testes usam SQLite em memória (`conftest.py` fixa `DATABASE_URL`/`ENVIRONMENT` antes de importar `app.*`) — sem banco real, sem Alembic (schema via `Base.metadata.create_all`).
 
-> ⚠️ **Não existe ambiente de desenvolvimento isolado.** O `backend/.env` local aponta para o **banco de produção** (Neon), e o webhook da Pluggy está registrado apontando para o **backend de produção** (Render). Duas consequências que já causaram problema real:
-> - Rodar o backend local escreve em dados de produção.
-> - **Corrigir lógica de sync localmente não protege os dados**: quem recebe o webhook (`item/created` ao conectar um banco) e o cron diário é o Render, com o código que estiver deployado. Ao consertar algo que o sync grava errado, **deploy primeiro, limpeza dos dados depois** — na ordem inversa, o próximo evento da Pluggy recria o problema.
+**Banco de dev = Postgres do `docker-compose.yml` (raiz), descartável.** `app/db/database.py` tem um **guard**: recusa subir se `DATABASE_URL` apontar para um host `*.neon.tech` (produção) com `ENVIRONMENT != production`. Escape hatch consciente: `ALLOW_PROD_DB=1` (para ler produção pontualmente). O `.env` local **não** deve conter a `DATABASE_URL` de produção.
+
+> ⚠️ **Isolamento parcial.** O guard e o Postgres local resolvem "rodar o backend local escreve em produção". Ainda em aberto (issue #4, PR 3): o **webhook da Pluggy** está registrado apontando para o **Render de produção**, então quem recebe `item/created`/`transactions/updated` e o cron diário é o código deployado.
+> - **Validar um fix de sync antes do deploy** ainda depende de replay de fixtures da Pluggy (issue #4, PR 2) ou de repontar o webhook para um túnel local.
+> - Enquanto isso: ao consertar algo que o sync grava errado em produção, **deploy primeiro, limpeza dos dados depois**.
 
 Config central em `app/core/config.py` (`pydantic-settings`) — nunca usar `os.getenv` solto em código novo, sempre `from app.core.config import settings`.
 

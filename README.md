@@ -122,15 +122,18 @@ FastAPI layered backend: **Router → Service → SQLAlchemy ORM → PostgreSQL*
 
 ## Running locally
 
-**Prerequisites:** Python 3.11+, Node.js 18+
+**Prerequisites:** Python 3.11+, Node.js 18+, Docker (for the local dev database)
 
 ```bash
+# Local dev database (disposable Postgres — never production)
+docker compose up -d db
+
 # Backend
 cd backend
-cp .env.example .env          # set DATABASE_URL, SECRET_KEY, Pluggy credentials, VAPID keys
+cp .env.example .env          # dev section works as-is; fill SECRET_KEY / Pluggy / VAPID
 pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload
+./scripts/dev_bootstrap.sh    # waits for the db, runs migrations, seeds demo data
+uvicorn app.main:app --reload # login: dono@lifeos.local / devpassword
 
 # Frontend
 cd frontend
@@ -138,9 +141,12 @@ npm install
 npm run dev                   # http://localhost:5173
 
 # Tests
-cd backend && pytest          # ~255 tests on in-memory SQLite
+cd backend && pytest          # ~260 tests on in-memory SQLite, no database needed
 cd frontend && npm test
 ```
+
+The backend refuses to start against a production (`*.neon.tech`) database unless
+`ENVIRONMENT=production` — see the guard in `app/db/database.py`.
 
 ---
 

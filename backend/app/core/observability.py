@@ -56,7 +56,7 @@ def init_sentry() -> None:
 
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
-        environment=settings.sentry_environment,
+        environment=settings.environment,
         # Só rastreio de erros por enquanto — sem performance tracing.
         traces_sample_rate=0.0,
         send_default_pii=False,

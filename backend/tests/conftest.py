@@ -1,3 +1,4 @@
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -10,6 +11,13 @@ from sqlalchemy.pool import StaticPool
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# Antes de importar `app.*`: a suíte roda contra SQLite em memória (cada teste
+# monta o seu). Fixar aqui garante que, mesmo que um `backend/.env` local
+# aponte para o Postgres de produção, nenhum teste toque nele — e o guard de
+# produção de `app/db/database.py` não dispara na coleta.
+os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
+os.environ.setdefault("ENVIRONMENT", "test")
 
 from app.core.users import current_active_user
 from app.db.database import Base
