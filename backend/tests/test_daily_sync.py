@@ -81,3 +81,25 @@ def test_daily_sync_endpoint_accepts_correct_secret(client, monkeypatch):
     )
     assert response.status_code == 200
     assert "processed_users" in response.json()
+
+
+def test_verify_sentry_requires_secret(client):
+    assert client.post("/jobs/verify-sentry").status_code == 403
+
+
+def test_verify_sentry_503_without_dsn(client, monkeypatch):
+    monkeypatch.setattr(settings, "cron_secret", "test-cron-secret")
+    monkeypatch.setattr(settings, "sentry_dsn", None)
+    response = client.post("/jobs/verify-sentry", headers={"X-Cron-Secret": "test-cron-secret"})
+    assert response.status_code == 503
+
+
+def test_verify_sentry_logs_error_when_configured(client, monkeypatch, caplog):
+    monkeypatch.setattr(settings, "cron_secret", "test-cron-secret")
+    monkeypatch.setattr(settings, "sentry_dsn", "https://k@o0.ingest.sentry.io/1")
+    with caplog.at_level("ERROR"):
+        response = client.post(
+            "/jobs/verify-sentry", headers={"X-Cron-Secret": "test-cron-secret"}
+        )
+    assert response.status_code == 200
+    assert any("verify-sentry" in r.message for r in caplog.records)
