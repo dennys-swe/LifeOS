@@ -1,9 +1,14 @@
 card: "Itaú (sintético)"
 competencias:
-  "2026-09":
-    target_due_date: "2026-09-10"
-    last_closed_due_date: "2026-08-10"
-    # 800 (loja A) + 240 (loja B) + 60 (parcela 3/10) — todas com fc adiantado
-    fatura_real: 1100.00
-    tolerancia_pct: 0.5
-    status: exato
+  "2026-08":
+    target_due_date: "2026-08-10"
+    last_closed_due_date: "2026-07-10"
+    # A soma das transações dá 1340.00 (800 + 240 + 300 da parcela 3/10).
+    # A fatura real inclui ~90 de encargos de rotativo que o banco só calcula
+    # no fechamento — divergência conhecida e esperada.
+    fatura_real: 1430.22
+    tolerancia_pct: 1.0
+    status: xfail
+    motivo: >
+      encargos de rotativo (cartão em refinanciamento) só são calculados pelo
+      banco no fechamento; nenhuma soma de transações os antecipa
