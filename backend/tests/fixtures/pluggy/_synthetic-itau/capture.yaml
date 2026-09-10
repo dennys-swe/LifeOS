@@ -1,9 +1,8 @@
 card: "Itaú (sintético)"
 source: synthetic
-captured_at: "2026-08-04"
+captured_at: "2026-09-10"
 pluggy_sdk: "n/a"
 note: >
-  Dados fabricados que reproduzem o padrão do Itaú em refinanciamento: parcelas
-  futuras já emitidas datadas no vencimento, e encargos de rotativo que o banco
-  só calcula no fechamento — nenhuma soma de transações antecipa esse valor.
-  Serve para exercitar o caminho `status: xfail` do teste.
+  Reproduz o bug real do Itaú: compras feitas DENTRO do mês-alvo vêm com
+  billForecastDate apontando o mês seguinte. Antes do fix, as 3 transações
+  caíam em outubro e a fatura de setembro dava R$ 0. Depois do fix, contam.
