@@ -1,0 +1,9 @@
+card: "Nubank (sintético)"
+source: synthetic
+captured_at: "2026-08-04"
+pluggy_sdk: "n/a"
+note: >
+  Dados fabricados que reproduzem o padrão do Nubank: só a parcela do ciclo
+  corrente é emitida (as futuras são projetadas), pendências entre fechamento e
+  vencimento pertencem ao ciclo seguinte, pagamento de fatura vem como crédito
+  e é excluído.

@@ -1,0 +1,70 @@
+[
+  {
+    "id": "syn-nu-0001",
+    "description": "MERCADO BOM PRECO",
+    "amount": 245.90,
+    "date": "2026-07-20T03:00:00.000Z",
+    "status": "PENDING",
+    "type": "DEBIT",
+    "category": "Groceries",
+    "creditCardMetadata": {
+      "cardNumber": "1234",
+      "billForecastDate": "2026-08"
+    }
+  },
+  {
+    "id": "syn-nu-0002",
+    "description": "POSTO IPIRANGA",
+    "amount": 180.00,
+    "date": "2026-07-25T03:00:00.000Z",
+    "status": "PENDING",
+    "type": "DEBIT",
+    "category": "Gas stations",
+    "creditCardMetadata": {
+      "cardNumber": "1234",
+      "billForecastDate": "2026-08"
+    }
+  },
+  {
+    "id": "syn-nu-0003",
+    "description": "RESTAURANTE SABOR",
+    "amount": 62.47,
+    "date": "2026-08-01T03:00:00.000Z",
+    "status": "PENDING",
+    "type": "DEBIT",
+    "category": "Restaurants",
+    "creditCardMetadata": {
+      "cardNumber": "1234",
+      "billForecastDate": "2026-08"
+    }
+  },
+  {
+    "id": "syn-nu-0004",
+    "description": "PAGAMENTO RECEBIDO",
+    "amount": -300.00,
+    "date": "2026-07-12T03:00:00.000Z",
+    "status": "PENDING",
+    "type": "CREDIT",
+    "category": "Transfers",
+    "creditCardMetadata": {
+      "cardNumber": "1234",
+      "billForecastDate": "2026-08"
+    }
+  },
+  {
+    "id": "syn-nu-0005",
+    "description": "CURSO ONLINE 2/4",
+    "amount": 100.00,
+    "date": "2026-06-03T03:00:00.000Z",
+    "status": "POSTED",
+    "type": "DEBIT",
+    "category": "Education",
+    "creditCardMetadata": {
+      "cardNumber": "1234",
+      "billId": "closed-2026-06",
+      "billForecastDate": "2026-06",
+      "installmentNumber": 2,
+      "totalInstallments": 4
+    }
+  }
+]

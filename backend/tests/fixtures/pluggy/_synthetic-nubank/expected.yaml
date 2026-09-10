@@ -1,0 +1,11 @@
+card: "Nubank (sintético)"
+competencias:
+  "2026-08":
+    target_due_date: "2026-08-08"
+    last_closed_due_date: "2026-07-08"
+    # 245.90 (mercado) + 180.00 (posto) + 62.47 (restaurante)
+    # + 100.00 (parcela 4/4 do curso, projetada a partir da 2/4)
+    # - 0 (o crédito "PAGAMENTO RECEBIDO" é excluído)
+    fatura_real: 588.37
+    tolerancia_pct: 0.5
+    status: exato

@@ -79,7 +79,9 @@ Camadas FastAPI seguindo o padrão: **Router → Service → SQLAlchemy ORM → 
 - `app/jobs/daily_sync.py` — job de sync diário (`python -m app.jobs.daily_sync`), pensado para rodar como Render Cron Job. Por usuário: sincroniza contas Pluggy, gera payables do mês a partir dos recorrentes, dispara push de contas vencendo. Também exposto via `POST /jobs/daily-sync` protegido por header `X-Cron-Secret`.
 - `alembic/versions/` — migrations em ordem cronológica.
 
-**Testes** (`backend/tests/`) usam `pytest` com SQLite em memória via `conftest.py`, que sobrescreve `get_db` **e** `current_active_user` (fixtures `user`/`other_user`) no `TestClient`. Para testar o fluxo real de auth (register/login/JWT) sem overrides, ver `tests/test_auth.py` (fixture `raw_client`).
+**Testes** (`backend/tests/`) usam `pytest` com SQLite em memória via `conftest.py`, que fixa `DATABASE_URL`/`ENVIRONMENT` **antes** de importar `app.*` (nenhum teste toca produção) e sobrescreve `get_db` **e** `current_active_user` (fixtures `user`/`other_user`) no `TestClient`. Para testar o fluxo real de auth (register/login/JWT) sem overrides, ver `tests/test_auth.py` (fixture `raw_client`).
+
+**Precisão de fatura por banco** (`tests/test_bill_precision.py`, issue #20): roda `compute_open_bill_amount` contra snapshots das respostas da Pluggy em `tests/fixtures/pluggy/`. Pastas `_synthetic-*` são versionadas (regressão no CI); capturas reais vão em `tests/fixtures/pluggy/_local/` (gitignored — o repo é público). Gerar com `python -m scripts.pluggy_capture <item_id> --slug <banco>` + `scripts.pluggy_scrub`; preencher `expected.yaml` com o valor real da fatura. `status: xfail` = divergência conhecida e explicada.
 
 **Compatibilidade SQLite:** `summary_service` agrega em Python (não SQL `GROUP BY`) para funcionar nos testes. Nunca usar `func.date_trunc` ou funções PostgreSQL-only nos services.
 
