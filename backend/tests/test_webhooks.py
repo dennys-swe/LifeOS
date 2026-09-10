@@ -64,3 +64,52 @@ def test_pluggy_webhook_skips_account_already_syncing(mock_sync, client, db_sess
 
     assert r.status_code == 200
     mock_sync.assert_not_called()
+
+
+@patch("app.api.endpoints.webhooks.bank_sync_service.sync_account")
+def test_secret_path_processes_with_correct_secret(mock_sync, client, db_session, user, monkeypatch):
+    monkeypatch.setattr("app.api.endpoints.webhooks.settings.pluggy_webhook_secret", "s3cr3t")
+    item_id = str(uuid4())
+    _make_account(db_session, user, external_id=item_id)
+    mock_sync.return_value = {"imported": 0, "skipped": 0, "bills_synced": 0, "auto_reconciled": 0, "suggestions": []}
+
+    r = client.post("/webhooks/pluggy/s3cr3t", json={"event": "transactions/created", "itemId": item_id})
+
+    assert r.status_code == 200
+    mock_sync.assert_called_once()
+
+
+@patch("app.api.endpoints.webhooks.bank_sync_service.sync_account")
+def test_secret_path_rejects_wrong_secret(mock_sync, client, db_session, user, monkeypatch):
+    monkeypatch.setattr("app.api.endpoints.webhooks.settings.pluggy_webhook_secret", "s3cr3t")
+    item_id = str(uuid4())
+    _make_account(db_session, user, external_id=item_id)
+
+    r = client.post("/webhooks/pluggy/wrong", json={"event": "transactions/created", "itemId": item_id})
+
+    assert r.status_code == 403
+    mock_sync.assert_not_called()
+
+
+@patch("app.api.endpoints.webhooks.bank_sync_service.sync_account")
+def test_bare_path_is_noop_when_secret_configured(mock_sync, client, db_session, user, monkeypatch):
+    monkeypatch.setattr("app.api.endpoints.webhooks.settings.pluggy_webhook_secret", "s3cr3t")
+    item_id = str(uuid4())
+    _make_account(db_session, user, external_id=item_id)
+
+    r = client.post("/webhooks/pluggy", json={"event": "transactions/created", "itemId": item_id})
+
+    assert r.status_code == 200
+    mock_sync.assert_not_called()
+
+
+@patch("app.api.endpoints.webhooks.bank_sync_service.sync_account")
+def test_secret_path_lenient_when_no_secret_configured(mock_sync, client, db_session, user):
+    item_id = str(uuid4())
+    _make_account(db_session, user, external_id=item_id)
+    mock_sync.return_value = {"imported": 0, "skipped": 0, "bills_synced": 0, "auto_reconciled": 0, "suggestions": []}
+
+    r = client.post("/webhooks/pluggy/anything", json={"event": "transactions/created", "itemId": item_id})
+
+    assert r.status_code == 200
+    mock_sync.assert_called_once()

@@ -43,9 +43,9 @@ O backend exige um arquivo `backend/.env` (ver `.env.example` — dividido em se
 
 **Banco de dev = Postgres do `docker-compose.yml` (raiz), descartável.** `app/db/database.py` tem um **guard**: recusa subir se `DATABASE_URL` apontar para um host `*.neon.tech` (produção) com `ENVIRONMENT != production`. Escape hatch consciente: `ALLOW_PROD_DB=1` (para ler produção pontualmente). O `.env` local **não** deve conter a `DATABASE_URL` de produção.
 
-> ⚠️ **Isolamento parcial.** O guard e o Postgres local resolvem "rodar o backend local escreve em produção". Ainda em aberto (issue #4, PR 3): o **webhook da Pluggy** está registrado apontando para o **Render de produção**, então quem recebe `item/created`/`transactions/updated` e o cron diário é o código deployado.
-> - **Validar um fix de sync antes do deploy** ainda depende de replay de fixtures da Pluggy (issue #4, PR 2) ou de repontar o webhook para um túnel local.
-> - Enquanto isso: ao consertar algo que o sync grava errado em produção, **deploy primeiro, limpeza dos dados depois**.
+> ⚠️ **Isolamento quase completo.** O guard + Postgres local resolvem "rodar o backend local escreve em produção". O `webhook da Pluggy` e o cron diário ainda batem no Render (código deployado), mas:
+> - **Validar um fix de sync antes do deploy:** replay de fixtures (`tests/test_bill_precision.py`, `tests/fixtures/pluggy/`) cobre a maior parte, e o webhook pode ser repontado para um túnel local — ver `docs/dev-live-sync.md`.
+> - Ao consertar algo que o sync grava errado **em produção**: ainda vale **deploy primeiro, limpeza depois** (o próximo webhook re-executa o código deployado).
 
 Config central em `app/core/config.py` (`pydantic-settings`) — nunca usar `os.getenv` solto em código novo, sempre `from app.core.config import settings`.
 
@@ -96,7 +96,7 @@ Camadas FastAPI seguindo o padrão: **Router → Service → SQLAlchemy ORM → 
 - `app/services/bank_sync_service.sync_account` — sincroniza transações (dedup por `(user_id, source="pluggy:{tx_id}")`) e, para contas `type == "CREDIT"`, também as faturas via `bill_service`. Usa `*_without_preload_content` + `json.loads` como workaround de um bug de validação Pydantic do SDK (`CreditCardMetadata.payeeMCC`); o mesmo padrão foi replicado para `BillApi.bills_list_without_preload_content`. Ao final, roda `suggest_reconciliation` + `auto_reconcile_confident_matches` sobre as transações recém-importadas.
 - `app/services/bill_service.py` — upsert de `CreditCardBill` por `(user_id, external_id)` e geração/atualização automática do `Payable` correspondente (nunca atualiza um payable já `PAID`).
 - Faturas só existem em conexões Open Finance Regulado — falha ao buscar degrada para lista vazia (não derruba o sync de transações), mas **loga em `WARNING`** (`app.services.bank_sync_service: bills indisponíveis ...`). Se a geração automática de `Payable` de fatura parar de acontecer, esse log é o primeiro lugar a olhar.
-- `app/api/endpoints/webhooks.py` — `POST /webhooks/pluggy` (público, sem auth) dispara `run_sync_job` em background para o item afetado nos eventos `item/created|updated` e `transactions/created|updated`. A URL é registrada no dashboard da Pluggy, não via código (`get_connect_token` não passa `ItemOptions.webhook_url`).
+- `app/api/endpoints/webhooks.py` — `POST /webhooks/pluggy/<secret>` dispara `run_sync_job` em background para o item afetado nos eventos `item/created|updated` e `transactions/created|updated`. Com `PLUGGY_WEBHOOK_SECRET` setado, o path sem segredo (`/webhooks/pluggy`) vira no-op (loga warning) — o segredo no path é a trava, já que a Pluggy não injeta credenciais. Sem a env var, os dois paths funcionam (compat). A URL é registrada no dashboard da Pluggy, não via código. Runbook de teste ao vivo: `docs/dev-live-sync.md`.
 
 #### Uso pessoal via conector "MeuPluggy" (sem plano comercial)
 
@@ -107,7 +107,7 @@ Setup (todo no dashboard/navegador, **não** em código):
 1. Conectar os bancos em https://meu.pluggy.ai.
 2. Em https://dashboard.pluggy.ai, criar uma **Development Application** → gera o `PLUGGY_CLIENT_ID`/`PLUGGY_CLIENT_SECRET`.
 3. Em Customização, habilitar o conector **MeuPluggy** (id `200`, `type=PERSONAL_BANK`, `oauth=True`).
-4. Registrar a webhook URL apontando para `<backend>/webhooks/pluggy`.
+4. Registrar a webhook URL apontando para `<backend>/webhooks/pluggy/<PLUGGY_WEBHOOK_SECRET>` (ver `docs/dev-live-sync.md`).
 5. No LifeOS, Contas Bancárias → Conectar → autorizar via OAuth — **uma vez por banco** conectado no MeuPluggy (banco, não conta).
 
 Fatos verificados empiricamente contra a API (2026-07-29, item real do dono):
@@ -230,7 +230,7 @@ Precisão medida: Nubank **exato** (R$ 588,37), Luiza +11% (anuidade que é esto
 | `PATCH` | `/bank-accounts/{id}` | Renomeia a conta (`name`/`bank_name`) |
 | `GET` | `/bank-accounts/reconciliation-suggestions` | Sugestões pendentes de conciliação (consumidas em `/banks`) |
 | `POST` | `/bank-accounts/connect-token` | Token do widget Pluggy Connect |
-| `POST` | `/webhooks/pluggy` | Webhook da Pluggy (público) — dispara sync do item afetado |
+| `POST` | `/webhooks/pluggy/{secret}` | Webhook da Pluggy — dispara sync do item afetado (segredo no path) |
 | `POST` | `/bank-accounts/{id}/sync` | Sync de transações + faturas + auto-reconciliação |
 | `GET` | `/credit-card-bills?month=&year=` | Lista faturas de cartão sincronizadas |
 | `POST` | `/push-subscriptions` | Salva subscription VAPID |

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     pluggy_client_id: str | None = None
     pluggy_client_secret: str | None = None
+    # Segredo no path da webhook: POST /webhooks/pluggy/<secret>. Quando setado,
+    # o path sem segredo passa a ser no-op. Ver app/api/endpoints/webhooks.py.
+    pluggy_webhook_secret: str | None = None
 
     vapid_private_key: str | None = None
     vapid_public_key: str | None = None
