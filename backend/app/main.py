@@ -19,6 +19,7 @@ from app.api.endpoints.transactions import router as transactions_router
 from app.api.endpoints.webhooks import router as webhooks_router
 from app.core.config import settings
 from app.core.observability import configure_logging, init_sentry
+from app.core.rate_limit import RateLimitMiddleware
 from app.core.users import auth_backend, fastapi_users
 from app.db.database import SessionLocal
 from app.schemas.user import UserCreate, UserRead, UserUpdate
@@ -29,6 +30,12 @@ init_sentry()
 logging.getLogger(__name__).info("LifeOS API iniciando: environment=%s", settings.environment)
 
 app = FastAPI(title="Controle Financeiro Pessoal API")
+
+# Adicionado antes do CORS: o CORS precisa envolver o rate limit (ordem de
+# execução no Starlette é LIFO por ordem de `add_middleware`) pra uma
+# resposta 429 ainda sair com os headers de CORS — senão o frontend não
+# consegue nem ler o corpo do erro.
+app.add_middleware(RateLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
