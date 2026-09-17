@@ -15,6 +15,12 @@ from app.models.payable import Payable, PayableStatus
 from app.services import open_bill_service
 
 
+def parse_pluggy_date(value: str) -> date:
+    """Data ISO da Pluggy (`"2026-08-10T00:00:00.000Z"`) sem depender de
+    `dateutil`. Compartilhada com `bank_sync_service`, que importa daqui."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+
+
 def list_bills(
     db: Session, user_id: UUID, month: Optional[int] = None, year: Optional[int] = None
 ) -> List[CreditCardBill]:
@@ -87,7 +93,7 @@ def upsert_bill(
 ) -> CreditCardBill:
     today = today or date.today()
     external_id = str(bill_data["id"])
-    due_date = datetime.fromisoformat(bill_data["dueDate"].replace("Z", "+00:00")).date()
+    due_date = parse_pluggy_date(bill_data["dueDate"])
     total_amount = Decimal(str(bill_data.get("totalAmount") or 0))
     minimum_payment = bill_data.get("minimumPaymentAmount")
     allows_installments = bill_data.get("allowsInstallments")
@@ -207,7 +213,7 @@ def _find_bill_id_for_month(bills_data: Optional[List[dict]], target_due: date) 
         raw_due = bill_data.get("dueDate")
         if not raw_due:
             continue
-        due = datetime.fromisoformat(raw_due.replace("Z", "+00:00")).date()
+        due = parse_pluggy_date(raw_due)
         if due.year == target_due.year and due.month == target_due.month:
             return str(bill_data["id"])
     return None

@@ -198,14 +198,20 @@ def debug_open_bills(
 
                 transactions = _raw_transactions(tx_api, pa.id)
                 target_due = next_due_date(last_closed_due, hoje)
-                explained = explain_open_bill_amount(transactions, target_due, last_closed_due)
+                target_bill_id = bill_service._find_bill_id_for_month(bills_by_due, target_due)
+                explained = explain_open_bill_amount(
+                    transactions, target_due, last_closed_due, target_bill_id
+                )
 
                 # E se a "última fechada" fosse a de vencimento mais distante
                 # (o bug antigo, issue #84)? Só pra comparação.
                 simulado = None
                 if mais_distante and mais_distante != last_closed_due:
                     alt_target = next_due_date(mais_distante, hoje)
-                    alt = explain_open_bill_amount(transactions, alt_target, mais_distante)
+                    alt_bill_id = bill_service._find_bill_id_for_month(bills_by_due, alt_target)
+                    alt = explain_open_bill_amount(
+                        transactions, alt_target, mais_distante, alt_bill_id
+                    )
                     simulado = {
                         "ultima_fatura_fechada": mais_distante.isoformat(),
                         "vencimento_alvo": alt_target.isoformat(),

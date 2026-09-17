@@ -264,12 +264,6 @@ def _linha(tx: dict, valor: Decimal, contou: bool, motivo: str) -> dict:
     }
 
 
-def _installment_share(
-    group: list[dict], last_closed_due_date: Optional[date], target_key: str
-) -> Decimal:
-    return _installment_detail(group, last_closed_due_date, target_key)[0]
-
-
 def _installment_detail(
     group: list[dict],
     last_closed_due_date: Optional[date],
