@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 import CategorySpendList from "../components/dashboard/CategorySpendList";
 import InsightCard from "../components/dashboard/InsightCard";
-import TrendChart from "../components/dashboard/TrendChart";
 import MonthNavigator from "../components/MonthNavigator";
 import Card, { CardHeader } from "../components/ui/Card";
 import DeltaBadge from "../components/ui/DeltaBadge";
@@ -13,6 +12,10 @@ import Skeleton, { SkeletonGrid } from "../components/ui/Skeleton";
 import { useFinance } from "../context/FinanceContext";
 import { fmt } from "../lib/format";
 import api from "../services/api";
+
+// Lazy: recharts é a maior dependência do bundle (issue #11) — só baixa
+// quando o dashboard é aberto, não no carregamento inicial da SPA.
+const TrendChart = lazy(() => import("../components/dashboard/TrendChart"));
 
 function pctChange(current, previous) {
   if (!previous || Number(previous) === 0) return null;
@@ -270,7 +273,9 @@ export default function DashboardPage({ month, year, onMonthChange }) {
                       Tendência · Últimos 6 Meses
                     </p>
                   </div>
-                  <TrendChart months={history} currentMonth={month} currentYear={year} height={115} />
+                  <Suspense fallback={<Skeleton className="h-[115px]" />}>
+                    <TrendChart months={history} currentMonth={month} currentYear={year} height={115} />
+                  </Suspense>
                 </div>
               )}
 
