@@ -86,6 +86,9 @@ def root():
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
     except Exception as exc:
+        # Amplo de propósito: qualquer falha aqui (timeout, connection reset,
+        # erro de driver) significa a mesma coisa — "não está pronto" — e
+        # nenhuma delas deve virar 500 não tratado num health check.
         logging.getLogger(__name__).exception("readiness check falhou: banco indisponível")
         raise HTTPException(status_code=503, detail="database unavailable") from exc
     return {"status": "ok"}

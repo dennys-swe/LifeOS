@@ -94,13 +94,16 @@ def create_account(db: Session, user_id: UUID, payload: BankAccountCreate) -> Ba
         try:
             derived_name, derived_bank = describe_item(UUID(data["external_id"]))
         except Exception as exc:
-            # Nome ruim é bem melhor que falhar a conexão — o usuário pode
-            # renomear depois via PATCH.
-            logger.warning(
+            # Amplo de propósito: nome ruim é bem melhor que falhar a conexão
+            # inteira (o usuário pode renomear depois via PATCH), e a origem
+            # aqui é uma chamada de rede pra Pluggy — não vale a pena arriscar
+            # deixar passar uma classe de erro de transporte não prevista.
+            # logger.exception (não .warning) porque isso É reportável: se
+            # acontecer com frequência, é sinal de problema na API/rede.
+            logger.exception(
                 "não foi possível derivar o nome do item %s: %s",
                 data["external_id"],
                 exc,
-                exc_info=True,
             )
             derived_name, derived_bank = "Conta bancária", "Desconhecido"
         data["name"] = data.get("name") or derived_name
@@ -299,11 +302,22 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                     )
                     bills_data = json.loads(raw_bills.data).get("results") or []
                 except Exception as exc:
-                    # Bills só existem em conexões Open Finance Regulado — degrada
-                    # para lista vazia quando a conexão não as suporta, mas loga:
-                    # sem isso não há como distinguir "conector não expõe faturas"
-                    # de um bug nosso, e a geração automática de Payable de fatura
-                    # some sem aviso.
+                    # Amplo por contrato, não por preguiça: bills é acessório
+                    # (transações são o dado oficial) e falha aqui NÃO PODE
+                    # derrubar o resto do sync — nem para reportar isso
+                    # elevamos a exceção. O SDK só embrulha SSLError em
+                    # ApiException (visto em pluggy_sdk/rest.py); timeout,
+                    # connection reset e afins propagam como exceção crua do
+                    # urllib3/socket, então estreitar para uma lista de
+                    # exceções conhecidas deixaria justamente essas falhas —
+                    # as mais comuns na prática — vazarem e derrubarem o sync
+                    # inteiro. Bills só existem em conexões Open Finance
+                    # Regulado — degrada para lista vazia quando a conexão
+                    # não as suporta, mas loga: sem isso não há como
+                    # distinguir "conector não expõe faturas" de um bug
+                    # nosso. WARNING (não .exception) de propósito: é rotina
+                    # esperada pra maioria dos conectores, não um bug —
+                    # elevar pro Sentry a cada sync geraria alerta constante.
                     logger.warning(
                         "bills indisponíveis (account=%s card=%r): %s",
                         pluggy_acct.id,
@@ -376,13 +390,18 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                 except Exception as exc:
                     # Estimativa é acessório: falhar aqui não pode derrubar o
                     # sync de transações e faturas, que são o dado oficial.
+                    # Amplo de propósito: é um cálculo heurístico sobre dados
+                    # reais e imprevisíveis de banco (parcelamento, formatos
+                    # que variam por instituição) — qualquer exceção aqui é
+                    # candidata a bug na conta, não um tipo específico
+                    # esperado, então vale reportar (.exception, não
+                    # .warning) mesmo sem crashar o sync.
                     db.rollback()
-                    logger.warning(
+                    logger.exception(
                         "fatura em aberto indisponível (account=%s card=%r): %s",
                         pluggy_acct.id,
                         card_name,
                         exc,
-                        exc_info=True,
                     )
 
     candidates, cross_feed_duplicates = _dedup_cross_feed_duplicates(candidates)
@@ -489,6 +508,10 @@ def run_sync_job(account_id: UUID, user_id: UUID) -> None:
             db.commit()
         except Exception as exc:
             db.rollback()
+            # Amplo de propósito: é o catch-all do job de background — se
+            # escapar daqui a task some sem deixar `sync_status` consistente
+            # (fica preso em SYNCING pra sempre). Qualquer falha, prevista ou
+            # não, precisa cair em ERROR.
             # Detalhe completo só no Sentry — `last_sync_error` é exposto na
             # API (`GET /bank-accounts`) e `str(exc)` pode incluir corpo de
             # resposta da Pluggy ou outro detalhe interno que não deve

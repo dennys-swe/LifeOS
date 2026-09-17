@@ -87,6 +87,18 @@ def debug_open_bills(
                     account_api.accounts_list(item_id=account.external_id).results or []
                 )
             except Exception as exc:
+                # Amplo de propósito: é um endpoint de diagnóstico interativo
+                # (dono olhando a resposta), então qualquer falha de uma
+                # conexão não pode interromper a leitura das demais. O erro
+                # some da tela quando a conexão é corrigida/removida, então
+                # também loga — sem isso não sobra rastro de qual conector
+                # falhou e por quê.
+                logger.warning(
+                    "debug de faturas: falha ao listar contas do item %s: %s",
+                    account.external_id,
+                    exc,
+                    exc_info=True,
+                )
                 out.append({"conexao": account.name, "erro": f"{type(exc).__name__}: {exc}"})
                 continue
 
@@ -103,7 +115,16 @@ def debug_open_bills(
                         ).get("results")
                         or []
                     )
-                except Exception:
+                except Exception as exc:
+                    # Mesmo caso de bank_sync_service: bills só existem em
+                    # conexões Open Finance Regulado, então é rotina — mas
+                    # sem logar não dá pra saber se é isso ou um erro real.
+                    logger.warning(
+                        "debug de faturas: bills indisponíveis (account=%s card=%r): %s",
+                        pa.id,
+                        card_name,
+                        exc,
+                    )
                     raw_bills = []
                 bills_by_due = sorted(
                     (b for b in raw_bills if b.get("dueDate")), key=lambda b: b["dueDate"]

@@ -59,6 +59,12 @@ def run(db: Optional[Session] = None) -> dict:
                 .all()
             )
 
+            # Os três try/except abaixo são amplos de propósito: o job roda
+            # pra todos os usuários numa só execução, então cada um isola sua
+            # etapa — a falha de UM usuário (ou de UMA conta, ou só do push)
+            # não pode derrubar o processamento de todo o resto. `errors`
+            # conta quantas vezes isso aconteceu e `.exception` garante que
+            # nada fica sem rastro no log/Sentry.
             for account in accounts:
                 try:
                     bank_sync_service.sync_account(db, account)
