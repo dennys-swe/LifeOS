@@ -1,0 +1,14 @@
+[
+  {
+    "id": "closed-sep",
+    "dueDate": "2026-09-12T03:00:00.000Z",
+    "billClosingDate": null,
+    "totalAmount": 769.01
+  },
+  {
+    "id": "open-oct",
+    "dueDate": "2026-10-12T03:00:00.000Z",
+    "billClosingDate": null,
+    "totalAmount": 401.78
+  }
+]

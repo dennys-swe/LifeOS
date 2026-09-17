@@ -194,6 +194,25 @@ def upsert_bill(
     return bill
 
 
+def _find_bill_id_for_month(bills_data: Optional[List[dict]], target_due: date) -> Optional[str]:
+    """Acha na Bills API crua o `id` da fatura que vence no mês de `target_due`.
+
+    A Bills API às vezes já projeta a fatura do próximo vencimento antes dela
+    fechar de verdade (o Inter projeta com quase um ano de antecedência; o
+    Itaú, só perto do vencimento). Quando existe, esse `id` é o sinal mais
+    confiável pra saber quais transações são desse ciclo — ver
+    `open_bill_service._bill_month` (issue #85).
+    """
+    for bill_data in bills_data or []:
+        raw_due = bill_data.get("dueDate")
+        if not raw_due:
+            continue
+        due = datetime.fromisoformat(raw_due.replace("Z", "+00:00")).date()
+        if due.year == target_due.year and due.month == target_due.month:
+            return str(bill_data["id"])
+    return None
+
+
 def upsert_open_bill(
     db: Session,
     user_id: UUID,
@@ -202,6 +221,7 @@ def upsert_open_bill(
     transactions: List[dict],
     card_name: Optional[str] = None,
     today: Optional[date] = None,
+    bills_data: Optional[List[dict]] = None,
 ) -> Optional[CreditCardBill]:
     """Reconstrói e salva a fatura do ciclo em aberto deste cartão.
 
@@ -247,7 +267,10 @@ def upsert_open_bill(
     if not is_in_payable_window(target_due, today):
         return None
 
-    amount = open_bill_service.compute_open_bill_amount(transactions, target_due, closed.due_date)
+    target_bill_id = _find_bill_id_for_month(bills_data, target_due)
+    amount = open_bill_service.compute_open_bill_amount(
+        transactions, target_due, closed.due_date, target_bill_id
+    )
 
     bill = db.execute(
         select(CreditCardBill).where(

@@ -109,15 +109,35 @@ def _purchase_key(tx: dict) -> tuple:
     return (meta.get("cardNumber"), meta.get("totalInstallments"), description)
 
 
-def _bill_month(tx: dict, last_closed_due_date: Optional[date], target_key: str) -> Optional[str]:
+def _bill_month(
+    tx: dict,
+    last_closed_due_date: Optional[date],
+    target_key: str,
+    target_bill_id: Optional[str] = None,
+) -> Optional[str]:
     """Em qual competência esta transação vai ser cobrada?
 
-    `billForecastDate` é a resposta direta quando existe. Sem ela, a data cai em
-    duas leituras: pendência entre o fechamento e o vencimento da última fatura
-    pertence ao ciclo seguinte (Nubank), e parcela futura vem datada no próprio
-    vencimento em que será cobrada (Itaú/Luiza). A janela cobre as duas.
+    `creditCardMetadata.billId` é o sinal mais forte que existe: é o próprio
+    `id` de uma fatura da Bills API (fechada ou só projetada), então bate
+    exato mesmo quando `billForecastDate` engana ou falta (Inter nunca manda
+    forecast, mas manda billId — inclusive nas transações que ainda vão para
+    o ciclo aberto, já que a Bills API projeta faturas futuras). `billId` só
+    é usado aqui para a **confirmação positiva** de que a transação é da
+    fatura-alvo (`target_bill_id`, resolvido pelo caller a partir da mesma
+    lista de faturas). Quando não bate — inclusive um billId de outra fatura
+    qualquer — cai para a leitura de sempre; forçar exclusão pelo billId
+    quebraria o rastreio de parcelamento (issue #85, ver histórico do commit).
+
+    Sem billId (ou sem confirmação), `billForecastDate` é a resposta direta
+    quando existe. Sem ela, a data cai em duas leituras: pendência entre o
+    fechamento e o vencimento da última fatura pertence ao ciclo seguinte
+    (Nubank), e parcela futura vem datada no próprio vencimento em que será
+    cobrada (Itaú/Luiza). A janela cobre as duas.
     """
     meta = _metadata(tx)
+    if target_bill_id and meta.get("billId") == target_bill_id:
+        return target_key
+
     forecast = meta.get("billForecastDate")
     settled = bool(meta.get("billId")) or tx.get("status") != "PENDING"
 
@@ -149,15 +169,23 @@ def compute_open_bill_amount(
     transactions: Iterable[dict],
     target_due_date: date,
     last_closed_due_date: Optional[date],
+    target_bill_id: Optional[str] = None,
 ) -> Decimal:
-    """Soma o que deve cair na fatura que vence em `target_due_date`."""
-    return explain_open_bill_amount(transactions, target_due_date, last_closed_due_date)["total"]
+    """Soma o que deve cair na fatura que vence em `target_due_date`.
+
+    `target_bill_id`: o `id` da fatura-alvo na Bills API, quando o banco já a
+    projeta (ver `_bill_month`). Sem ele, cai só na leitura por data/forecast.
+    """
+    return explain_open_bill_amount(
+        transactions, target_due_date, last_closed_due_date, target_bill_id
+    )["total"]
 
 
 def explain_open_bill_amount(
     transactions: Iterable[dict],
     target_due_date: date,
     last_closed_due_date: Optional[date],
+    target_bill_id: Optional[str] = None,
 ) -> dict:
     """Igual a `compute_open_bill_amount`, mas devolve o rastro por transação.
 
@@ -181,7 +209,7 @@ def explain_open_bill_amount(
             singles.append(tx)
 
     for tx in singles:
-        bill_month = _bill_month(tx, last_closed_due_date, target_key)
+        bill_month = _bill_month(tx, last_closed_due_date, target_key, target_bill_id)
         if bill_month == target_key:
             valor = _amount(tx)
             total += valor
@@ -192,7 +220,9 @@ def explain_open_bill_amount(
             )
 
     for group in installments.values():
-        valor, motivo, matched = _installment_detail(group, last_closed_due_date, target_key)
+        valor, motivo, matched = _installment_detail(
+            group, last_closed_due_date, target_key, target_bill_id
+        )
         total += valor
         if matched is not None:
             linhas.append(_linha(matched, valor, True, motivo))
@@ -241,7 +271,10 @@ def _installment_share(
 
 
 def _installment_detail(
-    group: list[dict], last_closed_due_date: Optional[date], target_key: str
+    group: list[dict],
+    last_closed_due_date: Optional[date],
+    target_key: str,
+    target_bill_id: Optional[str] = None,
 ) -> tuple[Decimal, str, Optional[dict]]:
     """Quanto deste parcelamento cai na fatura-alvo, com o motivo.
 
@@ -251,7 +284,7 @@ def _installment_detail(
     parear os registros.
     """
     for tx in group:
-        if _bill_month(tx, last_closed_due_date, target_key) == target_key:
+        if _bill_month(tx, last_closed_due_date, target_key, target_bill_id) == target_key:
             return _amount(tx), "parcela deste ciclo (emitida pelo banco)", tx
 
     # Nenhuma transação para este ciclo: o banco ainda não emitiu a parcela.
@@ -259,7 +292,7 @@ def _installment_detail(
     latest = None
     latest_month = None
     for tx in group:
-        month = _bill_month(tx, last_closed_due_date, target_key) or _month_key(
+        month = _bill_month(tx, last_closed_due_date, target_key, target_bill_id) or _month_key(
             _parse_date(tx.get("date")) or date.min
         )
         if latest_month is None or month > latest_month:

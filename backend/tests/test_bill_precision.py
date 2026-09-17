@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from app.services.bill_service import _find_bill_id_for_month
 from app.services.open_bill_service import compute_open_bill_amount
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "pluggy"
@@ -62,7 +63,16 @@ def test_precisao_fatura_aberta(fixture_dir: Path, competencia: str, spec: dict)
     target_due = date.fromisoformat(spec["target_due_date"])
     last_closed_due = date.fromisoformat(spec["last_closed_due_date"])
 
-    got = compute_open_bill_amount(transactions, target_due, last_closed_due)
+    # `bills.json` é opcional: quando presente, resolve o `id` da fatura-alvo
+    # na Bills API pra confirmar via `billId` (issue #85) — sem ele, cai só na
+    # leitura por data/forecast de sempre.
+    bills_path = fixture_dir / "bills.json"
+    target_bill_id = None
+    if bills_path.is_file():
+        bills_data = json.loads(bills_path.read_text())
+        target_bill_id = _find_bill_id_for_month(bills_data, target_due)
+
+    got = compute_open_bill_amount(transactions, target_due, last_closed_due, target_bill_id)
 
     real = Decimal(str(spec["fatura_real"]))
     tolerance = (real * Decimal(str(spec["tolerancia_pct"])) / Decimal("100")).quantize(

@@ -395,6 +395,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                             pluggy_acct.id,
                             raw_card_transactions,
                             card_name=card_name,
+                            bills_data=bills_data,
                         )
                         is not None
                     ):

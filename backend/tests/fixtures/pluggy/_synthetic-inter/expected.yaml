@@ -1,0 +1,15 @@
+card: "Inter (sintético)"
+competencias:
+  "2026-10":
+    target_due_date: "2026-10-12"
+    last_closed_due_date: "2026-09-12"
+    # Reproduz o mecanismo real do Inter (issue #85): ele nunca manda
+    # billForecastDate, então sem o billId a compra do BRISANET (15/09,
+    # settled/PENDING indiferente) some do cálculo — não conta em setembro
+    # (já fechado com outro valor) nem em outubro. `bills.json` traz o `id`
+    # da fatura de outubro (ainda "OPEN", só projetada pela Bills API), que
+    # o teste usa pra resolver `target_bill_id` e confirmar via billId.
+    # 79.99 (BRISANET, billId="open-oct") + 50.00 (compra nova, mesmo billId).
+    fatura_real: 129.99
+    tolerancia_pct: 0.01
+    status: exato
