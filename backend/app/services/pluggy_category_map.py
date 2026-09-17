@@ -116,7 +116,7 @@ PLUGGY_TO_CATEGORY.update({nome: "Transferências" for nome in THIRD_PARTY_TRANS
 # `Transfers` genérico. Sem reconhecê-los, a quitação conta como gasto e a
 # mesma grana entra duas vezes — a compra no cartão **e** o pagamento da
 # fatura. Eram R$ 681,10 em jun+jul/2026, 6,4% do gasto do período.
-_BILL_PAYMENT_DESCRIPTION = re.compile(r"pagamento\s+(de\s+)?fatura|fatura\s+paga", re.IGNORECASE)
+BILL_PAYMENT_DESCRIPTION = re.compile(r"pagamento\s+(de\s+)?fatura|fatura\s+paga", re.IGNORECASE)
 
 # "Saldo em atraso" é o saldo devedor do rotativo/refinanciamento rolado do
 # mês anterior, não um gasto novo — a compra que o originou já entrou como
@@ -133,7 +133,7 @@ def is_transfer(pluggy_category: str | None, description: str | None = None) -> 
     if not description:
         return False
     return bool(
-        _BILL_PAYMENT_DESCRIPTION.search(description)
+        BILL_PAYMENT_DESCRIPTION.search(description)
         or _OVERDUE_BALANCE_ROLLOVER_DESCRIPTION.search(description)
     )
 

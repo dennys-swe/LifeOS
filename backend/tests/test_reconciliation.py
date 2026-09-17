@@ -469,3 +469,30 @@ def test_real_bill_payment_confirms_alone_even_a_few_days_late(db_session, user)
     db_session.refresh(p)
     assert p.status == PayableStatus.PAID
     assert p.transaction_id == payment.id
+
+
+def test_same_transaction_cannot_confirm_two_different_bills(db_session, user):
+    """Achado do /code-review: duas faturas com o mesmo valor por coincidência
+    não podem ser quitadas pela mesma transação — sem essa checagem, um único
+    pagamento marcaria as duas como PAID."""
+    p1 = _bill_payable(db_session, user, Decimal("150.00"), date(2026, 9, 10))
+    p2 = _bill_payable(db_session, user, Decimal("150.00"), date(2026, 9, 12))
+    payment = Transaction(
+        user_id=user.id,
+        date=date(2026, 9, 14),
+        description="Pagamento de fatura",
+        amount=Decimal("150.00"),
+        type=TransactionType.EXPENSE,
+        external_category="Credit card payment",
+    )
+    db_session.add(payment)
+    db_session.commit()
+
+    suggestions = suggest_reconciliation(db_session, user.id, [payment])
+    confirmed = auto_reconcile_confident_matches(db_session, user.id, suggestions)
+
+    assert confirmed == []
+    db_session.refresh(p1)
+    db_session.refresh(p2)
+    assert p1.status == PayableStatus.PENDING
+    assert p2.status == PayableStatus.PENDING
