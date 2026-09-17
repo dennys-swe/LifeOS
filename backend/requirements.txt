@@ -62,6 +62,7 @@ requests==2.34.2
 rich==15.0.0
 rich-toolkit==0.19.9
 rignore==0.7.6
+ruff==0.16.8
 sentry-sdk==2.60.0
 shellingham==1.5.4
 six==1.17.0

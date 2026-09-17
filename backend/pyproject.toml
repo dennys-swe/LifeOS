@@ -1,0 +1,28 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311" # mesma linha que o Render/CI usam em produção
+# Geradas pelo Alembic e não escritas à mão — reformatar reescreveria o
+# histórico de migrations por inteiro sem nenhum ganho.
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+]
+ignore = [
+    "E501", # linha longa — o formatter já cuida da maioria; o resto não vale a briga
+    "B008", # Depends(...)/Query(...) como default de parâmetro é o padrão do FastAPI
+]
+
+# UP (pyupgrade, ex: Optional[X] -> X | None) fica de fora por ora — é
+# ~300 das ~460 violações atuais, puro cosmético de sintaxe, e o objetivo
+# desta issue é ter lint de bug real + formatter, não reescrever toda
+# anotação de tipo do projeto num commit só.
+
+[tool.ruff.lint.per-file-ignores]
+# Import depois de setar DATABASE_URL/ENVIRONMENT é proposital: garante que
+# nenhum teste importe app.* antes do ambiente de teste estar montado.
+"tests/conftest.py" = ["E402"]
