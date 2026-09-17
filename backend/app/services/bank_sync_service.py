@@ -261,6 +261,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     skipped = 0
     bills_synced = 0
     open_bills_synced = 0
+    retired_open_bills = 0
     new_transactions: List[Transaction] = []
     # Candidatas de todas as contas do item, para dedup por similaridade entre
     # feeds antes de inserir (issue #32) — ver `_dedup_cross_feed_duplicates`.
@@ -297,8 +298,10 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         bill_api = pluggy_sdk.BillApi(ac)
 
         pluggy_accounts = account_api.accounts_list(item_id=item_id).results or []
+        seen_pluggy_account_ids: set[str] = set()
 
         for pluggy_acct in pluggy_accounts:
+            seen_pluggy_account_ids.add(pluggy_acct.id)
             is_credit = getattr(pluggy_acct, "type", None) == "CREDIT"
             card_name = getattr(pluggy_acct, "marketing_name", None) or getattr(
                 pluggy_acct, "name", None
@@ -413,6 +416,19 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         exc,
                     )
 
+    if seen_pluggy_account_ids:
+        # Vazio é sinal ambíguo (glitch transitório da Pluggy), não "todos os
+        # cartões sumiram" — nesse caso não mexe em nada (issue #25).
+        try:
+            retired_open_bills = bill_service.retire_vanished_open_bills(
+                db, account.user_id, account, seen_pluggy_account_ids
+            )
+        except Exception as exc:
+            db.rollback()
+            logger.exception(
+                "falha ao aposentar fatura de cartão sumido (account=%s): %s", account.id, exc
+            )
+
     candidates, cross_feed_duplicates = _dedup_cross_feed_duplicates(candidates)
     skipped += cross_feed_duplicates
 
@@ -471,6 +487,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         "skipped": skipped,
         "bills_synced": bills_synced,
         "open_bills_synced": open_bills_synced,
+        "retired_open_bills": retired_open_bills,
         "auto_reconciled": len(auto_confirmed),
         "suggestions": remaining_suggestions,
     }
