@@ -487,10 +487,15 @@ def run_sync_job(account_id: UUID, user_id: UUID) -> None:
             db.commit()
         except Exception as exc:
             db.rollback()
+            # Detalhe completo só no Sentry — `last_sync_error` é exposto na
+            # API (`GET /bank-accounts`) e `str(exc)` pode incluir corpo de
+            # resposta da Pluggy ou outro detalhe interno que não deve
+            # aparecer na tela do usuário.
+            logger.exception("sync falhou (account=%s user=%s)", account_id, user_id)
             account = get_account(db, user_id, account_id)
             if account is not None:
                 account.sync_status = BankAccountSyncStatus.ERROR
-                account.last_sync_error = str(exc)
+                account.last_sync_error = f"Falha ao sincronizar: {type(exc).__name__}"
                 db.add(account)
                 db.commit()
     finally:
