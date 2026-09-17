@@ -133,15 +133,17 @@ def debug_open_bills(
                 ja_venceram = [
                     b for b in bills_by_due if date.fromisoformat(b["dueDate"][:10]) <= hoje
                 ]
-                # Escolha atual (bugada): a fatura de data mais alta — pega projeções futuras.
-                atual = (
+                # A fatura de data mais alta pega projeções futuras (o Inter
+                # publica com quase um ano de antecedência) — usada só pra
+                # comparação abaixo (era o bug da issue #84).
+                mais_distante = (
                     date.fromisoformat(bills_by_due[-1]["dueDate"][:10]) if bills_by_due else None
                 )
-                # Escolha correta: a última fatura já vencida.
+                # Escolha correta, usada em produção: a última fatura já vencida.
                 corrigida = (
                     date.fromisoformat(ja_venceram[-1]["dueDate"][:10]) if ja_venceram else None
                 )
-                last_closed_due = atual
+                last_closed_due = corrigida
 
                 stored_bills = (
                     db.execute(
@@ -198,13 +200,14 @@ def debug_open_bills(
                 target_due = next_due_date(last_closed_due, hoje)
                 explained = explain_open_bill_amount(transactions, target_due, last_closed_due)
 
-                # E se a "última fechada" fosse a última já vencida?
+                # E se a "última fechada" fosse a de vencimento mais distante
+                # (o bug antigo, issue #84)? Só pra comparação.
                 simulado = None
-                if corrigida and corrigida != last_closed_due:
-                    alt_target = next_due_date(corrigida, hoje)
-                    alt = explain_open_bill_amount(transactions, alt_target, corrigida)
+                if mais_distante and mais_distante != last_closed_due:
+                    alt_target = next_due_date(mais_distante, hoje)
+                    alt = explain_open_bill_amount(transactions, alt_target, mais_distante)
                     simulado = {
-                        "ultima_fatura_fechada": corrigida.isoformat(),
+                        "ultima_fatura_fechada": mais_distante.isoformat(),
                         "vencimento_alvo": alt_target.isoformat(),
                         "total_calculado": str(alt["total"]),
                     }

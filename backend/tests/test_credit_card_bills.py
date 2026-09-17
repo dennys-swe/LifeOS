@@ -624,6 +624,7 @@ def test_debug_endpoint_reports_bills_and_simulation(
     card = r.json()["cartoes"][0]
     assert card["conta_pluggy"]["status"] == "ACTIVE"
     assert len(card["faturas_pluggy"]) == 2
-    assert card["ultima_fatura_fechada"] == "2027-06-10"  # bug atual: pega a projeção
-    assert card["ultima_fatura_ja_vencida"] == "2026-08-10"  # correção
-    assert card["simulado_com_ultima_vencida"]["ultima_fatura_fechada"] == "2026-08-10"
+    assert card["ultima_fatura_fechada"] == "2026-08-10"  # correção (issue #84)
+    assert card["ultima_fatura_ja_vencida"] == "2026-08-10"
+    # simulado agora mostra o bug antigo (pegar a projeção), só pra comparação
+    assert card["simulado_com_ultima_vencida"]["ultima_fatura_fechada"] == "2027-06-10"
