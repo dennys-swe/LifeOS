@@ -6,6 +6,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.transaction import Transaction, TransactionType
@@ -15,7 +16,16 @@ from app.schemas.transaction import TransactionCreate
 def create_transaction(db: Session, user_id: UUID, payload: TransactionCreate) -> Transaction:
     item = Transaction(user_id=user_id, **payload.model_dump())
     db.add(item)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        # `source` é client-settable (o endpoint aceita lançamento manual com
+        # `source` explícito) e colide com a constraint que o sync da Pluggy
+        # depende pra dedup (uq_transactions_user_id_source, issue #8) — sem
+        # isso, o commit falho deixava a sessão em estado abortado e o
+        # cliente via um 500 cru em vez de um erro de validação.
+        db.rollback()
+        raise ValueError("Já existe uma transação com esse source para este usuário.") from exc
     db.refresh(item)
     return item
 

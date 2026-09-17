@@ -31,7 +31,10 @@ def create_transaction_manual(
     db: Session = Depends(get_db),
     user: User = Depends(current_active_user),
 ):
-    return create_transaction(db, user.id, payload)
+    try:
+        return create_transaction(db, user.id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("", response_model=List[TransactionResponse])

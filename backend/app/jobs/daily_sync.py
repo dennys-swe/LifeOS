@@ -70,6 +70,14 @@ def run(db: Optional[Session] = None) -> dict:
                     bank_sync_service.sync_account(db, account)
                     synced_accounts += 1
                 except Exception as exc:
+                    # Sem o rollback, um commit que falha (ex: IntegrityError
+                    # de uq_transactions_user_id_source — issue #8 — numa
+                    # corrida entre este cron e um sync manual da mesma
+                    # conta) deixa a sessão abortada pro resto do laço: toda
+                    # query seguinte, de qualquer usuário, falharia com
+                    # PendingRollbackError. `db` é compartilhado pela
+                    # execução inteira do job, não por usuário/conta.
+                    db.rollback()
                     errors += 1
                     logger.exception(
                         "sync falhou (user=%s account=%s): %s", user.id, account.id, exc
@@ -80,12 +88,14 @@ def run(db: Optional[Session] = None) -> dict:
                     db, user.id, month=today.month, year=today.year
                 )
             except Exception as exc:
+                db.rollback()
                 errors += 1
                 logger.exception("generate_for_month falhou (user=%s): %s", user.id, exc)
 
             try:
                 push_service.send_upcoming_notifications(db, user.id, days=3)
             except Exception as exc:
+                db.rollback()
                 errors += 1
                 logger.exception("push falhou (user=%s): %s", user.id, exc)
 
