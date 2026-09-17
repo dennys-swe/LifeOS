@@ -276,6 +276,21 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     category_ids_by_name = {cat.name: cat.id for cat in user_categories}
     category_kind_by_id = {cat.id: cat.kind for cat in user_categories}
 
+    # Carregado uma vez fora do loop de páginas (issue #8): checar duplicata
+    # com um SELECT por transação faz uma conta com histórico longo custar
+    # centenas de round-trips por sync. `existing_sources` também evita
+    # inserir duas vezes a mesma transação se a paginação da Pluggy repetir
+    # um id entre páginas dentro do mesmo sync.
+    existing_sources: set[str] = set(
+        db.execute(
+            select(Transaction.source).where(
+                Transaction.user_id == account.user_id, Transaction.source.is_not(None)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     with get_api_client() as ac:
         account_api = pluggy_sdk.AccountApi(ac)
         tx_api = pluggy_sdk.TransactionApi(ac)
@@ -354,18 +369,12 @@ def sync_account(db: Session, account: BankAccount) -> dict:
 
                 for tx in transactions:
                     source_key = f"pluggy:{tx['id']}"
-                    exists = db.execute(
-                        select(Transaction).where(
-                            Transaction.user_id == account.user_id,
-                            Transaction.source == source_key,
-                        )
-                    ).scalar_one_or_none()
-
-                    if exists:
+                    if source_key in existing_sources:
                         skipped += 1
                         continue
 
                     candidates.append({"tx": tx, "source_key": source_key})
+                    existing_sources.add(source_key)
 
                 if page >= total_pages:
                     break

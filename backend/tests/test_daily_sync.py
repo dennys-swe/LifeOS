@@ -80,3 +80,81 @@ def test_daily_sync_endpoint_accepts_correct_secret(client, monkeypatch):
     response = client.post("/jobs/daily-sync", headers={"X-Cron-Secret": "test-cron-secret"})
     assert response.status_code == 200
     assert "processed_users" in response.json()
+
+
+def test_session_recovers_after_a_failed_commit_mid_loop(db_session, user):
+    """Achado na revisão do PR da issue #8: um `db.commit()` que falha de
+    verdade (não só uma exceção genérica) deixa a sessão do SQLAlchemy
+    abortada até um `rollback()` explícito — sem ele, TODO o resto do job
+    (outras contas, outros usuários, generate_for_month, push) quebraria
+    com PendingRollbackError depois de uma única falha de commit.
+    """
+    from app.models.transaction import Transaction, TransactionType
+
+    acc = BankAccount(
+        user_id=user.id,
+        name="Conta",
+        bank_name="Banco",
+        account_type="checking",
+        external_id="item-123",
+    )
+    db_session.add(acc)
+    db_session.add(
+        Transaction(
+            user_id=user.id,
+            date=date.today(),
+            description="já existe",
+            amount=100,
+            type=TransactionType.EXPENSE,
+            source="pluggy:dup",
+        )
+    )
+    db_session.commit()
+
+    def _fail_with_real_integrity_error(db, account):
+        # Mesma violação que um IntegrityError real de
+        # uq_transactions_user_id_source dispararia — dedup do sync é feito
+        # em memória (issue #8) então isso só aconteceria numa corrida entre
+        # dois syncs da mesma conta, mas o efeito na sessão é o mesmo.
+        db.add(
+            Transaction(
+                user_id=user.id,
+                date=date.today(),
+                description="corrida",
+                amount=1,
+                type=TransactionType.EXPENSE,
+                source="pluggy:dup",
+            )
+        )
+        db.commit()
+
+    create_recurring(
+        db_session,
+        user.id,
+        RecurringPayableCreate(
+            title="Academia",
+            amount=100,
+            day_of_month=1,
+            active=True,
+            start_date=date(date.today().year, 1, 1),
+        ),
+    )
+
+    with patch(
+        "app.jobs.daily_sync.bank_sync_service.sync_account",
+        side_effect=_fail_with_real_integrity_error,
+    ):
+        result = run(db_session)
+
+    assert result["errors"] >= 1
+    # a sessão se recuperou: generate_for_month rodou depois do commit
+    # falho e gerou o payable normalmente, em vez de propagar
+    # PendingRollbackError pro resto do job
+    from app.models.payable import Payable
+
+    generated = (
+        db_session.query(Payable)
+        .filter(Payable.user_id == user.id, Payable.title == "Academia")
+        .all()
+    )
+    assert len(generated) == 1
