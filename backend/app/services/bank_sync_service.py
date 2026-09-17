@@ -277,6 +277,13 @@ def _dedup_against_existing(
     existing = db.execute(
         select(Transaction.amount, Transaction.description, Transaction.date).where(
             Transaction.user_id == user_id,
+            # Só compara contra transação vinda da Pluggy. Um lançamento
+            # manual (source=None) não é candidato a reemissão de banco — o
+            # próprio invariante de `source=None` documentado no modelo
+            # (transação manual nunca colide com nada) ficaria violado se
+            # entrasse aqui, e coincidência de valor+descrição com um
+            # lançamento manual derrubaria a transação real da Pluggy.
+            Transaction.source.is_not(None),
             Transaction.date >= min(dates) - timedelta(days=2),
             Transaction.date <= max(dates) + timedelta(days=2),
         )
