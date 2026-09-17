@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { Navigate, Outlet } from "react-router";
 
 import { useAuth } from "../context/AuthContext";
@@ -7,6 +7,8 @@ import Sidebar from "./Sidebar";
 import BottomNav from "./BottomNav";
 import Header from "./Header";
 import FabModal from "./FabModal";
+import PageLoader from "./PageLoader";
+import Skeleton from "./ui/Skeleton";
 
 export default function ProtectedLayout() {
   const { user, loading } = useAuth();
@@ -20,16 +22,7 @@ export default function ProtectedLayout() {
   };
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
-          <p className="font-display text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-            LifeOS · Carregando...
-          </p>
-        </div>
-      </div>
-    );
+    return <PageLoader />;
   }
 
   if (!user) {
@@ -45,15 +38,20 @@ export default function ProtectedLayout() {
         <div className="flex flex-1 flex-col overflow-x-hidden md:ml-64">
           <Header />
           <main className="flex-1 pb-20 md:pb-8">
-            <Outlet
-              context={{
-                month: selectedMonth,
-                year: selectedYear,
-                onMonthChange: handleMonthChange,
-                payablesFilter,
-                onPayablesFilterChange: setPayablesFilter,
-              }}
-            />
+            {/* Suspense aqui (não em volta de todo <Routes>) — a página lazy
+                suspende só o conteúdo; Sidebar/Header/BottomNav continuam
+                montados em vez de a casca inteira sumir a cada rota nova. */}
+            <Suspense fallback={<Skeleton className="m-4 h-64" />}>
+              <Outlet
+                context={{
+                  month: selectedMonth,
+                  year: selectedYear,
+                  onMonthChange: handleMonthChange,
+                  payablesFilter,
+                  onPayablesFilterChange: setPayablesFilter,
+                }}
+              />
+            </Suspense>
           </main>
         </div>
 

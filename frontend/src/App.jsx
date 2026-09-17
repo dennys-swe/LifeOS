@@ -5,6 +5,7 @@ import { ThemeProvider } from "./context/ThemeContext";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedLayout from "./components/ProtectedLayout";
 import PageLoader from "./components/PageLoader";
+import RouteErrorBoundary from "./components/RouteErrorBoundary";
 
 // Lazy: cada página só baixa quando a rota é visitada — o bundle inicial não
 // precisa de todas de uma vez (issue #11, bundle único de 765kB).
@@ -45,23 +46,25 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
+        <RouteErrorBoundary>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
 
-            <Route element={<ProtectedLayout />}>
-              <Route path="/" element={<DashboardRoute />} />
-              <Route path="/categoria/:id" element={<CategoryDetailPage />} />
-              <Route path="/payables" element={<PayablesRoute />} />
-              <Route path="/transactions" element={<TransactionsRoute />} />
-              <Route path="/banks" element={<BankAccountsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-            </Route>
+              <Route element={<ProtectedLayout />}>
+                <Route path="/" element={<DashboardRoute />} />
+                <Route path="/categoria/:id" element={<CategoryDetailPage />} />
+                <Route path="/payables" element={<PayablesRoute />} />
+                <Route path="/transactions" element={<TransactionsRoute />} />
+                <Route path="/banks" element={<BankAccountsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+              </Route>
 
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Suspense>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </RouteErrorBoundary>
       </AuthProvider>
     </ThemeProvider>
   );
