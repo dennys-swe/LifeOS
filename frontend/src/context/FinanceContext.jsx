@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { loadFinanceCache, saveFinanceCache } from "../lib/financeCache";
 import api from "../services/api";
 
 const FinanceContext = createContext(null);
@@ -13,22 +14,13 @@ const FinanceContext = createContext(null);
 // novo — o de PayablesPage inclusive CHAMA refresh() dentro do próprio
 // efeito, criando um loop de refetch a cada vez que a aba era aberta.
 // sessionStorage sobrevive a um F5 (só nesta aba), então o reload também
-// aproveita o último dado bom em vez de mostrar tela zerada.
-const SESSION_CACHE_KEY = "lifeos-finance-cache-v1";
-
-function loadSessionCache() {
-  const raw = sessionStorage.getItem(SESSION_CACHE_KEY);
-  return raw ? new Map(Object.entries(JSON.parse(raw))) : new Map();
-}
-
-function saveSessionCache(cache) {
-  sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(Object.fromEntries(cache)));
-}
+// aproveita o último dado bom em vez de mostrar tela zerada. Limpo no
+// logout em services/api.js (clearToken) — ver lib/financeCache.js.
 
 export function FinanceProvider({ children, month, year }) {
   const cacheRef = useRef(null);
   if (cacheRef.current === null) {
-    cacheRef.current = loadSessionCache();
+    cacheRef.current = loadFinanceCache();
   }
   const lastRefreshKeyRef = useRef(0);
 
@@ -79,10 +71,18 @@ export function FinanceProvider({ children, month, year }) {
           summary: summaryRes.data ?? null,
         };
         cacheRef.current.set(key, data);
-        saveSessionCache(cacheRef.current);
         setPayables(data.payables);
         setCategories(data.categories);
         setSummary(data.summary);
+        // Persistência em sessionStorage é só uma otimização de reload — se
+        // falhar (quota, modo privado), o cache em memória já foi atualizado
+        // e a tela já tem o dado certo; não pode derrubar os setState acima.
+        try {
+          saveFinanceCache(cacheRef.current);
+        } catch {
+          // sem persistência entre reloads nesta sessão, mas os dados na
+          // tela e o cache em memória continuam corretos
+        }
       } catch {
         // keep previous data on error
       } finally {
