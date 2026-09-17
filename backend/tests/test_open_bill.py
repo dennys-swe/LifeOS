@@ -206,7 +206,16 @@ def _closed_bill(db_session, user, account, due_date):
         user.id,
         account,
         "pluggy-acc-1",
-        {"id": f"closed-{due_date}", "dueDate": f"{due_date}T00:00:00Z", "totalAmount": 400.0},
+        {
+            "id": f"closed-{due_date}",
+            "dueDate": f"{due_date}T00:00:00Z",
+            # billClosingDate presente = sinal de fechamento real
+            # (_bill_is_really_closed, issue #90) — sem isso, o status CLOSED
+            # esperado por estes testes dependeria do relógio real batendo
+            # devido com a data fixa do fixture, em vez de ser determinístico.
+            "billClosingDate": f"{due_date}T00:00:00Z",
+            "totalAmount": 400.0,
+        },
         card_name="Cartão X",
     )
 
@@ -303,7 +312,12 @@ def test_closed_bill_replaces_open_estimate_and_generates_payable(db_session, us
         user.id,
         account,
         "pluggy-acc-1",
-        {"id": "real-aug", "dueDate": "2026-08-08T00:00:00Z", "totalAmount": 588.37},
+        {
+            "id": "real-aug",
+            "dueDate": "2026-08-08T00:00:00Z",
+            "billClosingDate": "2026-08-01T00:00:00Z",
+            "totalAmount": 588.37,
+        },
         card_name="Cartão X",
     )
 

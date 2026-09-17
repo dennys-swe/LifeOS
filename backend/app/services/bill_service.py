@@ -187,7 +187,7 @@ def upsert_bill(
 
     bill.synced_at = datetime.now(timezone.utc)
 
-    _sync_payable(db, bill, account)
+    _sync_payable(db, bill, account, today=today)
 
     db.commit()
     db.refresh(bill)
