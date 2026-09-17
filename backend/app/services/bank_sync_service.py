@@ -142,10 +142,6 @@ def get_connect_token(item_id: Optional[UUID] = None) -> str:
     return resp.access_token
 
 
-def _parse_pluggy_date(date_str: str) -> date_type:
-    return datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
-
-
 def _transaction_type(tx: dict) -> TransactionType:
     """Deriva INCOME/EXPENSE do campo `type` da Pluggy, não do sinal do valor.
 
@@ -227,7 +223,7 @@ def _dedup_cross_feed_duplicates(candidates: List[dict]) -> tuple[List[dict], in
         tx = candidate["tx"]
         amount = Decimal(str(tx.get("amount", 0) or 0))
         description = _normalize_purchase_description(tx.get("description"))
-        tx_date = _parse_pluggy_date(tx["date"]) if tx.get("date") else None
+        tx_date = bill_service.parse_pluggy_date(tx["date"]) if tx.get("date") else None
 
         duplicate = False
         for kept in survivors:
@@ -238,7 +234,9 @@ def _dedup_cross_feed_duplicates(candidates: List[dict]) -> tuple[List[dict], in
                 description, _normalize_purchase_description(kept_tx.get("description"))
             ):
                 continue
-            kept_date = _parse_pluggy_date(kept_tx["date"]) if kept_tx.get("date") else None
+            kept_date = (
+                bill_service.parse_pluggy_date(kept_tx["date"]) if kept_tx.get("date") else None
+            )
             if tx_date is None or kept_date is None or abs((tx_date - kept_date).days) > 2:
                 continue
             duplicate = True
@@ -395,6 +393,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                             pluggy_acct.id,
                             raw_card_transactions,
                             card_name=card_name,
+                            bills_data=bills_data,
                         )
                         is not None
                     ):
@@ -436,7 +435,9 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         tx = candidate["tx"]
         amount_raw = tx.get("amount", 0) or 0
         tx_type = _transaction_type(tx)
-        tx_date = _parse_pluggy_date(tx["date"]) if tx.get("date") else date_type.today()
+        tx_date = (
+            bill_service.parse_pluggy_date(tx["date"]) if tx.get("date") else date_type.today()
+        )
         description = (tx.get("description") or "")[:255]
         normalized = description.upper()
         pluggy_category = tx.get("category")

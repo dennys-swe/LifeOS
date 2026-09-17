@@ -173,6 +173,41 @@ def test_pending_with_stale_forecast_rolls_into_open_cycle():
     ) == Decimal("78.12")
 
 
+def test_billid_matching_target_bill_counts_even_without_forecast():
+    """Issue #85: o Inter nunca manda billForecastDate, mas manda billId — e a
+    Bills API já projeta a fatura seguinte com um id próprio (confirmado contra
+    captura real: `billId` da transação bate exato com o `id` da fatura na Bills
+    API, inclusive faturas futuras). Uma compra sem forecast, com billId da
+    fatura-alvo, tem que contar mesmo sem nenhum outro sinal.
+    """
+    txs = [_tx(79.99, "2026-09-15", bill_id="oct-bill", status="PENDING")]
+    assert open_bill_service.compute_open_bill_amount(
+        txs, date(2026, 10, 12), date(2026, 9, 12), target_bill_id="oct-bill"
+    ) == Decimal("79.99")
+
+
+def test_billid_of_a_different_bill_falls_back_to_old_logic_not_excluded_outright():
+    """O billId só confirma quando bate com a fatura-alvo — quando aponta pra
+    outra fatura (aqui, a que acabou de fechar), a classificação cai na leitura
+    de sempre (forecast/settled) em vez de ser descartada de cara. Isso evita
+    reproduzir o bug do fix anterior: contar em dobro uma compra comum que já
+    foi cobrada de verdade na fatura fechada.
+    """
+    txs = [
+        _tx(
+            55.77,
+            "2026-07-01",
+            forecast="2026-09",
+            bill_id="sep-bill",
+            status="POSTED",
+            description="COMPRA JA FATURADA",
+        )
+    ]
+    assert open_bill_service.compute_open_bill_amount(
+        txs, date(2026, 10, 12), date(2026, 9, 12), target_bill_id="oct-bill"
+    ) == Decimal("0.00")
+
+
 def test_next_due_date_keeps_day_of_month():
     assert open_bill_service.next_due_date(date(2026, 7, 8), date(2026, 8, 4)) == date(2026, 8, 8)
     assert open_bill_service.next_due_date(date(2026, 12, 10), date(2027, 1, 2)) == date(
@@ -353,6 +388,29 @@ def test_open_bill_is_recomputed_on_next_sync(db_session, user):
 
     assert second.id == first.id
     assert second.total_amount == Decimal("220.00")
+
+
+def test_open_bill_uses_billid_from_bills_data_even_without_forecast(db_session, user):
+    """Reproduz o mecanismo real do Inter (issue #85): ele nunca manda
+    `billForecastDate`, mas o `billId` da transação bate exato com o `id` de
+    uma fatura ainda não fechada — só presente porque a Bills API já a
+    projeta. `bills_data` é a mesma lista crua que `bank_sync_service` repassa
+    do sync de faturas para o de transações.
+    """
+    account = _make_account(db_session, user)
+    _closed_bill(db_session, user, account, "2026-07-08")
+
+    bill = bill_service.upsert_open_bill(
+        db_session,
+        user.id,
+        account,
+        "pluggy-acc-1",
+        [_tx(79.99, "2026-07-25", bill_id="aug-bill", status="PENDING")],
+        today=date(2026, 8, 4),
+        bills_data=[{"id": "aug-bill", "dueDate": "2026-08-08T00:00:00Z"}],
+    )
+
+    assert bill.total_amount == Decimal("79.99")
 
 
 def test_no_open_bill_when_bank_already_projects_far_ahead(db_session, user):

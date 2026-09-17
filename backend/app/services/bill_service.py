@@ -15,6 +15,12 @@ from app.models.payable import Payable, PayableStatus
 from app.services import open_bill_service
 
 
+def parse_pluggy_date(value: str) -> date:
+    """Data ISO da Pluggy (`"2026-08-10T00:00:00.000Z"`) sem depender de
+    `dateutil`. Compartilhada com `bank_sync_service`, que importa daqui."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+
+
 def list_bills(
     db: Session, user_id: UUID, month: Optional[int] = None, year: Optional[int] = None
 ) -> List[CreditCardBill]:
@@ -87,7 +93,7 @@ def upsert_bill(
 ) -> CreditCardBill:
     today = today or date.today()
     external_id = str(bill_data["id"])
-    due_date = datetime.fromisoformat(bill_data["dueDate"].replace("Z", "+00:00")).date()
+    due_date = parse_pluggy_date(bill_data["dueDate"])
     total_amount = Decimal(str(bill_data.get("totalAmount") or 0))
     minimum_payment = bill_data.get("minimumPaymentAmount")
     allows_installments = bill_data.get("allowsInstallments")
@@ -194,6 +200,25 @@ def upsert_bill(
     return bill
 
 
+def _find_bill_id_for_month(bills_data: Optional[List[dict]], target_due: date) -> Optional[str]:
+    """Acha na Bills API crua o `id` da fatura que vence no mês de `target_due`.
+
+    A Bills API às vezes já projeta a fatura do próximo vencimento antes dela
+    fechar de verdade (o Inter projeta com quase um ano de antecedência; o
+    Itaú, só perto do vencimento). Quando existe, esse `id` é o sinal mais
+    confiável pra saber quais transações são desse ciclo — ver
+    `open_bill_service._bill_month` (issue #85).
+    """
+    for bill_data in bills_data or []:
+        raw_due = bill_data.get("dueDate")
+        if not raw_due:
+            continue
+        due = parse_pluggy_date(raw_due)
+        if due.year == target_due.year and due.month == target_due.month:
+            return str(bill_data["id"])
+    return None
+
+
 def upsert_open_bill(
     db: Session,
     user_id: UUID,
@@ -202,6 +227,7 @@ def upsert_open_bill(
     transactions: List[dict],
     card_name: Optional[str] = None,
     today: Optional[date] = None,
+    bills_data: Optional[List[dict]] = None,
 ) -> Optional[CreditCardBill]:
     """Reconstrói e salva a fatura do ciclo em aberto deste cartão.
 
@@ -247,7 +273,10 @@ def upsert_open_bill(
     if not is_in_payable_window(target_due, today):
         return None
 
-    amount = open_bill_service.compute_open_bill_amount(transactions, target_due, closed.due_date)
+    target_bill_id = _find_bill_id_for_month(bills_data, target_due)
+    amount = open_bill_service.compute_open_bill_amount(
+        transactions, target_due, closed.due_date, target_bill_id
+    )
 
     bill = db.execute(
         select(CreditCardBill).where(

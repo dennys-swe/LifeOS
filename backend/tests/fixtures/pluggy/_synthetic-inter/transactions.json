@@ -1,0 +1,41 @@
+[
+  {
+    "id": "syn-inter-0001",
+    "description": "MERCADINHO CENTRAL",
+    "amount": 55.23,
+    "date": "2026-09-02T03:00:00.000Z",
+    "status": "POSTED",
+    "type": "DEBIT",
+    "category": "Groceries",
+    "creditCardMetadata": {
+      "cardNumber": "5678",
+      "billId": "closed-sep"
+    }
+  },
+  {
+    "id": "syn-inter-0002",
+    "description": "BRISANET INTERNET",
+    "amount": 79.99,
+    "date": "2026-09-15T03:00:00.000Z",
+    "status": "PENDING",
+    "type": "DEBIT",
+    "category": "Utilities",
+    "creditCardMetadata": {
+      "cardNumber": "5678",
+      "billId": "open-oct"
+    }
+  },
+  {
+    "id": "syn-inter-0003",
+    "description": "MERCADO CENTRAL",
+    "amount": 50.00,
+    "date": "2026-09-28T03:00:00.000Z",
+    "status": "PENDING",
+    "type": "DEBIT",
+    "category": "Groceries",
+    "creditCardMetadata": {
+      "cardNumber": "5678",
+      "billId": "open-oct"
+    }
+  }
+]
