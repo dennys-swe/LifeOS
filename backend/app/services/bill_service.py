@@ -267,6 +267,52 @@ def upsert_open_bill(
     return bill
 
 
+def retire_vanished_open_bills(
+    db: Session,
+    user_id: UUID,
+    account: BankAccount,
+    seen_pluggy_account_ids: set[str],
+) -> int:
+    """Cartão cancelado/desativado some da resposta da Pluggy pro item, mas
+    nada parava de gerar conta a pagar pra ele (issue #25) — a fatura em
+    aberto (reconstruída de transações) continuava lá, PENDING pra sempre.
+
+    Só mexe em `CreditCardBill` **OPEN**: `CLOSED` é o valor oficial que o
+    banco já fechou, histórico válido mesmo se o cartão for cancelado depois
+    — nunca é retirado. O `Payable` ligado só é removido se ainda `PENDING`;
+    um já `PAID` nunca é tocado (é obrigação que já foi honrada).
+
+    `seen_pluggy_account_ids` vazio (a Pluggy não devolveu nenhuma conta pro
+    item nesta passada) é tratado como sinal ambíguo, não "tudo sumiu" — um
+    glitch transitório não pode apagar fatura/payable de todo mundo; quem
+    chama já pula esta função nesse caso.
+    """
+    ghost_bills = (
+        db.execute(
+            select(CreditCardBill).where(
+                CreditCardBill.user_id == user_id,
+                CreditCardBill.bank_account_id == account.id,
+                CreditCardBill.status == CreditCardBillStatus.OPEN,
+                CreditCardBill.pluggy_account_id.not_in(seen_pluggy_account_ids),
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    for bill in ghost_bills:
+        if bill.payable_id is not None:
+            payable = db.get(Payable, bill.payable_id)
+            if payable is not None and payable.status == PayableStatus.PENDING:
+                db.delete(payable)
+        db.delete(bill)
+
+    if ghost_bills:
+        db.commit()
+
+    return len(ghost_bills)
+
+
 def update_bill_customization(
     db: Session, user_id: UUID, bill_id: UUID, changes: dict
 ) -> Optional[CreditCardBill]:
