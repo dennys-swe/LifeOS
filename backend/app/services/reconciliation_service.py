@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from typing import List
 from uuid import UUID
@@ -21,6 +22,14 @@ DATE_TOLERANCE_DAYS = 7
 # com um desses textos fixos, no mesmo valor. Não é ambiguidade real: é o
 # mesmo evento contado duas vezes.
 GENERIC_BILL_PAYMENT_ECHOES = {"PAGAMENTO RECEBIDO", "PAGAMENTO COM SALDO"}
+
+# Descrição de quitação de fatura de verdade sempre traz "PAGAMENTO" ou
+# "FATURA PAGA" (ex: "Pagamento de fatura", "PAGAMENTO FATURA INTER",
+# "FATURA PAGA ITAU MULTIPL" — o mesmo padrão documentado acima pros ecos).
+# Uma cobrança comum do próprio cartão (anuidade, encargo, compra) nunca traz
+# nenhum dos dois, mesmo quando o valor bate por coincidência com o total da
+# fatura — ver `_is_real_bill_payment`.
+_BILL_PAYMENT_DESCRIPTION = re.compile(r"\bPAGAMENTO\b|\bFATURA\s+PAGA\b", re.IGNORECASE)
 
 
 def _reconcilable(tx: Transaction) -> bool:
@@ -92,6 +101,23 @@ def drop_resolved_payables(
     return [s for s in suggestions if s.payable_id not in resolved_payable_ids]
 
 
+def _is_real_bill_payment(tx: Transaction) -> bool:
+    """A transação é de fato uma quitação de fatura, não só uma cobrança comum
+    do próprio cartão que por coincidência bate o valor da fatura?
+
+    Sem isso, uma fatura cujo total é só uma cobrança isolada (ex: anuidade de
+    cartão cancelado, sem mais nenhuma compra no ciclo) reconciliava consigo
+    mesma: a cobrança e a "quitação" eram a mesma transação, então o payable
+    virava PAID sem nenhum pagamento de verdade ter acontecido — inclusive com
+    cobrança **futura** já datada no vencimento (parcelamento do Itaú/Luiza),
+    o que marcava a fatura como paga antes mesmo do vencimento chegar.
+    """
+    return bool(
+        tx.external_category == CREDIT_CARD_PAYMENT
+        or _BILL_PAYMENT_DESCRIPTION.search(tx.description or "")
+    )
+
+
 def suggest_reconciliation(
     db: Session,
     user_id: UUID,
@@ -106,6 +132,7 @@ def suggest_reconciliation(
         .scalars()
         .all()
     )
+    bill_payable_ids = _bill_payable_ids(db, user_id)
 
     suggestions: List[ReconciliationSuggestionResponse] = []
 
@@ -116,6 +143,12 @@ def suggest_reconciliation(
         tx_amount = Decimal(str(tx.amount))
 
         for payable in pending_payables:
+            # Fatura de cartão: uma cobrança comum do próprio cartão não pode
+            # se passar por pagamento só porque o valor bate (issue relatada
+            # pelo dono — anuidade do Luiza "quitando" a própria fatura).
+            if payable.id in bill_payable_ids and not _is_real_bill_payment(tx):
+                continue
+
             p_amount = Decimal(str(payable.amount))
             exact_amount = tx_amount == p_amount
 
@@ -209,49 +242,57 @@ def auto_reconcile_confident_matches(
         except ValueError:
             continue
 
-    confirmed += _auto_resolve_bill_payment_echoes(
+    confirmed += _auto_resolve_bill_payments(
         db, user_id, suggestions, already_confirmed=confirmed_payable_ids
     )
     return confirmed
 
 
-def _auto_resolve_bill_payment_echoes(
+def _auto_resolve_bill_payments(
     db: Session,
     user_id: UUID,
     suggestions: List[ReconciliationSuggestionResponse],
     already_confirmed: set[UUID],
 ) -> List[UUID]:
-    """Para faturas de cartão, quando há mais de um candidato de valor exato
-    (confidence >= 0.8) e só um deles NÃO é uma descrição-eco genérica
-    (GENERIC_BILL_PAYMENT_ECHOES), confirma esse — ele é o débito real, o
-    outro é só o registro informativo do banco pro mesmo pagamento."""
+    """Para faturas de cartão, a data bater exato não é exigida: todo
+    candidato aqui já passou por `_is_real_bill_payment` em
+    `suggest_reconciliation`, então não é uma cobrança comum coincidindo em
+    valor — é a própria Pluggy/descrição do banco confirmando que aquilo é
+    quitação. Um candidato único já confirma sozinho (esse era o caso que
+    ficava perdido: pagamento real, feito alguns dias depois do vencimento,
+    sem nenhum "eco" pra desambiguar). Mais de um candidato — o débito real e
+    o eco genérico do banco pro mesmo evento (ex: "PAGAMENTO RECEBIDO") —
+    escolhe o que não é eco."""
     by_payable: dict[UUID, list[ReconciliationSuggestionResponse]] = {}
     for s in suggestions:
         if s.confidence_score >= 0.8 and s.payable_id not in already_confirmed:
             by_payable.setdefault(s.payable_id, []).append(s)
 
-    candidates = {pid: group for pid, group in by_payable.items() if len(group) > 1}
-    if not candidates:
+    if not by_payable:
         return []
 
     bill_payable_ids = _bill_payable_ids(db, user_id)
 
     confirmed: List[UUID] = []
-    for payable_id, group in candidates.items():
+    for payable_id, group in by_payable.items():
         if payable_id not in bill_payable_ids:
             continue
-        specific = [
-            s
-            for s in group
-            if s.transaction_description.strip().upper() not in GENERIC_BILL_PAYMENT_ECHOES
-        ]
-        if len(specific) != 1:
-            continue
+        if len(group) == 1:
+            chosen = group[0]
+        else:
+            specific = [
+                s
+                for s in group
+                if s.transaction_description.strip().upper() not in GENERIC_BILL_PAYMENT_ECHOES
+            ]
+            if len(specific) != 1:
+                continue
+            chosen = specific[0]
         try:
             confirm_reconciliation(
-                db, user_id, transaction_id=specific[0].transaction_id, payable_id=payable_id
+                db, user_id, transaction_id=chosen.transaction_id, payable_id=payable_id
             )
-            confirmed.append(specific[0].transaction_id)
+            confirmed.append(chosen.transaction_id)
         except ValueError:
             continue
 
