@@ -45,16 +45,100 @@ def _iso(d: date) -> str:
     return f"{d.isoformat()}T00:00:00Z"
 
 
-def _bill_payload(bill_id="bill-1", due_date=None, total_amount=850.0):
+def _bill_payload(bill_id="bill-1", due_date=None, total_amount=850.0, *, closed=True):
+    """`closed=True` (padrão): simula o caso normal — banco preenche
+    `billClosingDate` quando a fatura fecha de verdade (Itaú/Nubank/Luiza).
+    `closed=False`: simula o caso do Inter (issue nova, achada na sessão do
+    #85) — a Bills API dá um valor pra fatura futura sem nunca preencher
+    `billClosingDate`, então `_bill_is_really_closed` não pode confiar nela
+    como definitiva."""
     due_date = due_date or _iso(_in_window(10, months_ahead=1))
     return {
         "id": bill_id,
         "dueDate": due_date,
+        "billClosingDate": (_iso(date.today() - timedelta(days=3)) if closed else None),
         "totalAmount": total_amount,
         "totalAmountCurrencyCode": "BRL",
         "minimumPaymentAmount": 100.0,
         "allowsInstallments": True,
     }
+
+
+def test_bill_without_closing_date_and_future_due_is_stored_as_open(db_session, user):
+    """O Inter dá o valor da próxima fatura meses antes de fechar, sem nunca
+    preencher `billClosingDate` — tratar isso como `CLOSED` mostrava
+    "Fechada" na UI com um valor que ainda pode mudar."""
+    acc = _make_account(db_session, user)
+    bill = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-inter", _bill_payload(closed=False)
+    )
+
+    assert bill.status == CreditCardBillStatus.OPEN
+    assert bill.total_amount == Decimal("850.00")
+
+
+def test_bill_with_closing_date_is_closed_even_far_in_the_future(db_session, user):
+    """`billClosingDate` presente é sinal direto — confia nele independente
+    de quão longe o vencimento está (não é esperado na prática, mas não deve
+    depender de proximidade de data)."""
+    acc = _make_account(db_session, user)
+    far_due = _iso(_in_window(10, months_ahead=6))
+    bill = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload(due_date=far_due, closed=True)
+    )
+
+    assert bill.status == CreditCardBillStatus.CLOSED
+
+
+def test_previously_misclassified_closed_bill_self_corrects_to_open(db_session, user):
+    """Antes deste fix, uma fatura do Inter sem `billClosingDate` e vencimento
+    futuro virava `CLOSED` — dado já gravado errado antes do fix subir.
+    Como o mesmo `bill_data` chega de novo em todo sync, o upsert seguinte
+    já corrige sozinho: não precisa de script de correção retroativa."""
+    acc = _make_account(db_session, user)
+    payload = _bill_payload(closed=False)
+
+    # simula o estado pré-fix: alguém força CLOSED direto no banco
+    stale = bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-inter", payload)
+    stale.status = CreditCardBillStatus.CLOSED
+    db_session.add(stale)
+    db_session.commit()
+
+    corrected = bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-inter", payload)
+
+    assert corrected.id == stale.id
+    assert corrected.status == CreditCardBillStatus.OPEN
+
+
+def test_open_bill_reconstruction_does_not_overwrite_a_bank_provided_projection(db_session, user):
+    """Quando a Bills API já deu um valor pra este ciclo (mesmo sem fechar
+    de verdade), esse valor é mais confiável que nossa própria soma de
+    transações (que sofre do mesmo gap de rolagem de competência da issue
+    #85) — `upsert_open_bill` não pode sobrescrever."""
+    acc = _make_account(db_session, user)
+    closed_due = _iso(_in_window(10))
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-inter", _bill_payload("b1", closed_due)
+    )
+    projected = bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-inter",
+        _bill_payload(
+            "b2", _iso(_in_window(10, months_ahead=1)), total_amount=401.78, closed=False
+        ),
+    )
+    assert projected.status == CreditCardBillStatus.OPEN
+
+    result = bill_service.upsert_open_bill(
+        db_session, user.id, acc, "pluggy-acc-inter", [], card_name="Inter"
+    )
+
+    assert result.id == projected.id
+    assert result.total_amount == Decimal(
+        "401.78"
+    )  # não foi sobrescrito por compute_open_bill_amount([]) == 0
 
 
 def test_upsert_bill_creates_payable(db_session, user):

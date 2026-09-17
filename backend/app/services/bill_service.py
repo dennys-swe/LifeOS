@@ -57,6 +57,25 @@ def is_in_payable_window(due_date: date, today: Optional[date] = None) -> bool:
     return start <= due_date <= end
 
 
+def _bill_is_really_closed(bill_data: dict, due_date: date, today: date) -> bool:
+    """A Bills API pode devolver fatura que ainda não fechou de verdade.
+
+    O Inter projeta com meses de antecedência e **nunca** preenche
+    `billClosingDate` (confirmado direto na API, inclusive em faturas já
+    vencidas) — tratar qualquer entrada da Bills API como definitiva
+    gravava fatura futura como `CLOSED` (a UI mostra "Fechada") com um
+    valor que ainda pode mudar até o ciclo realmente fechar.
+
+    `billClosingDate` presente é o sinal direto de fechamento real (Itaú
+    preenche a partir de ~7 dias antes do vencimento). Ausente — caso do
+    Inter — cai no fallback: só confia que fechou se o vencimento já
+    passou.
+    """
+    if bill_data.get("billClosingDate"):
+        return True
+    return due_date <= today
+
+
 def upsert_bill(
     db: Session,
     user_id: UUID,
@@ -64,12 +83,19 @@ def upsert_bill(
     pluggy_account_id: str,
     bill_data: dict,
     card_name: Optional[str] = None,
+    today: Optional[date] = None,
 ) -> CreditCardBill:
+    today = today or date.today()
     external_id = str(bill_data["id"])
     due_date = datetime.fromisoformat(bill_data["dueDate"].replace("Z", "+00:00")).date()
     total_amount = Decimal(str(bill_data.get("totalAmount") or 0))
     minimum_payment = bill_data.get("minimumPaymentAmount")
     allows_installments = bill_data.get("allowsInstallments")
+    status = (
+        CreditCardBillStatus.CLOSED
+        if _bill_is_really_closed(bill_data, due_date, today)
+        else CreditCardBillStatus.OPEN
+    )
 
     bill = db.execute(
         select(CreditCardBill).where(
@@ -130,7 +156,7 @@ def upsert_bill(
             custom_color_hex=existing_color,
             due_date=due_date,
             total_amount=total_amount,
-            status=CreditCardBillStatus.CLOSED,
+            status=status,
             minimum_payment_amount=(
                 Decimal(str(minimum_payment)) if minimum_payment is not None else None
             ),
@@ -139,9 +165,13 @@ def upsert_bill(
         db.add(bill)
         db.flush()
     else:
-        # Vindo da Bills API, o valor é oficial: se este registro era a
-        # reconstrução do ciclo em aberto, ele agora vira a fatura fechada.
-        bill.status = CreditCardBillStatus.CLOSED
+        # Vindo da Bills API, o valor é o mais oficial disponível — mas só é
+        # realmente definitivo (`CLOSED`) quando _bill_is_really_closed diz
+        # que sim; senão é uma projeção do banco (ex: Inter), tratada como
+        # `OPEN` igual a uma reconstrução nossa (mesmo aviso de estimativa
+        # na UI), só que com o valor vindo direto do banco em vez de somado
+        # por nós.
+        bill.status = status
         bill.due_date = due_date
         bill.total_amount = total_amount
         bill.minimum_payment_amount = (
@@ -157,7 +187,7 @@ def upsert_bill(
 
     bill.synced_at = datetime.now(timezone.utc)
 
-    _sync_payable(db, bill, account)
+    _sync_payable(db, bill, account, today=today)
 
     db.commit()
     db.refresh(bill)
@@ -228,9 +258,17 @@ def upsert_open_bill(
         )
     ).scalar_one_or_none()
 
-    if bill is not None and bill.status == CreditCardBillStatus.CLOSED:
-        # O banco fechou a fatura desse vencimento entre um sync e outro — o
-        # valor oficial manda, nada a estimar.
+    if bill is not None and (
+        bill.status == CreditCardBillStatus.CLOSED or not bill.external_id.startswith("open:")
+    ):
+        # `status == CLOSED`: o banco fechou a fatura desse vencimento entre
+        # um sync e outro — o valor oficial manda, nada a estimar.
+        # `external_id` "real" (não é o synthetic "open:..." que só esta
+        # função gera): a Bills API já deu um valor pra este ciclo mesmo sem
+        # fechar de verdade (projeção do Inter, ver _bill_is_really_closed)
+        # — o valor do banco, mesmo cedo, é melhor que nossa soma de
+        # transações, que sofre do mesmo gap de rolagem de competência
+        # (issue #85).
         return bill
 
     if bill is None:
