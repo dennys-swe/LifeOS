@@ -1,4 +1,5 @@
 """Filtros de GET /transactions que sustentam o drill-down do dashboard."""
+
 from __future__ import annotations
 
 import uuid
@@ -102,9 +103,7 @@ def test_pagination_is_stable_for_same_day(client, db_session, user):
     for offset in (0, 2, 4):
         vistos += [
             t["id"]
-            for t in client.get(
-                f"/transactions?month=7&year=2026&limit=2&offset={offset}"
-            ).json()
+            for t in client.get(f"/transactions?month=7&year=2026&limit=2&offset={offset}").json()
         ]
 
     assert len(vistos) == len(set(vistos)) == 6

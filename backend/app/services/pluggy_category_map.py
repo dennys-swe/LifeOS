@@ -10,6 +10,7 @@ que a Pluggy inventar cai em `None` (sem categoria) em vez de ser adivinhada
 errado — e `Transaction.external_category` guarda o valor cru, então dá para
 descobrir o que ficou de fora e completar o mapa depois.
 """
+
 from __future__ import annotations
 
 import re
@@ -115,9 +116,7 @@ PLUGGY_TO_CATEGORY.update({nome: "Transferências" for nome in THIRD_PARTY_TRANS
 # `Transfers` genérico. Sem reconhecê-los, a quitação conta como gasto e a
 # mesma grana entra duas vezes — a compra no cartão **e** o pagamento da
 # fatura. Eram R$ 681,10 em jun+jul/2026, 6,4% do gasto do período.
-_BILL_PAYMENT_DESCRIPTION = re.compile(
-    r"pagamento\s+(de\s+)?fatura|fatura\s+paga", re.IGNORECASE
-)
+_BILL_PAYMENT_DESCRIPTION = re.compile(r"pagamento\s+(de\s+)?fatura|fatura\s+paga", re.IGNORECASE)
 
 # "Saldo em atraso" é o saldo devedor do rotativo/refinanciamento rolado do
 # mês anterior, não um gasto novo — a compra que o originou já entrou como
@@ -125,9 +124,7 @@ _BILL_PAYMENT_DESCRIPTION = re.compile(
 # atraso em "Late payment and overdraft costs" (-> Taxas), e sem distinguir
 # pela descrição essa rolagem conta como Taxas nova todo mês (R$ 456,02 de
 # R$ 501,85 do card "Taxas" em set/2026 era só esse item).
-_OVERDUE_BALANCE_ROLLOVER_DESCRIPTION = re.compile(
-    r"saldo\s+em\s+atraso", re.IGNORECASE
-)
+_OVERDUE_BALANCE_ROLLOVER_DESCRIPTION = re.compile(r"saldo\s+em\s+atraso", re.IGNORECASE)
 
 
 def is_transfer(pluggy_category: str | None, description: str | None = None) -> bool:

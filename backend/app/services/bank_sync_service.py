@@ -29,21 +29,24 @@ from app.services.reconciliation_service import (
     suggest_reconciliation,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
 def list_accounts(db: Session, user_id: UUID) -> List[BankAccount]:
-    return db.execute(
-        select(BankAccount).where(BankAccount.user_id == user_id).order_by(BankAccount.name.asc())
-    ).scalars().all()
+    return (
+        db.execute(
+            select(BankAccount)
+            .where(BankAccount.user_id == user_id)
+            .order_by(BankAccount.name.asc())
+        )
+        .scalars()
+        .all()
+    )
 
 
 def get_account(db: Session, user_id: UUID, account_id: UUID) -> Optional[BankAccount]:
     return db.execute(
-        select(BankAccount).where(
-            BankAccount.id == account_id, BankAccount.user_id == user_id
-        )
+        select(BankAccount).where(BankAccount.id == account_id, BankAccount.user_id == user_id)
     ).scalar_one_or_none()
 
 
@@ -70,9 +73,7 @@ def describe_item(item_id: UUID) -> tuple[str, str]:
     labels: List[str] = []
     for pluggy_acct in ordered:
         label = (
-            getattr(pluggy_acct, "marketing_name", None)
-            or getattr(pluggy_acct, "name", None)
-            or ""
+            getattr(pluggy_acct, "marketing_name", None) or getattr(pluggy_acct, "name", None) or ""
         ).strip()
         if label and label not in labels:
             labels.append(label)
@@ -92,7 +93,7 @@ def create_account(db: Session, user_id: UUID, payload: BankAccountCreate) -> Ba
     if (not data.get("name") or not data.get("bank_name")) and data.get("external_id"):
         try:
             derived_name, derived_bank = describe_item(UUID(data["external_id"]))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # Nome ruim é bem melhor que falhar a conexão — o usuário pode
             # renomear depois via PATCH.
             logger.warning(
@@ -266,9 +267,9 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     # se registrou antes de "Saúde"/"Compras"/"Taxas"/"Seguros" entrarem no
     # DEFAULT_CATEGORIES ainda não as tem.
     seed_default_categories(db, account.user_id)
-    user_categories = db.execute(
-        select(Category).where(Category.user_id == account.user_id)
-    ).scalars().all()
+    user_categories = (
+        db.execute(select(Category).where(Category.user_id == account.user_id)).scalars().all()
+    )
     category_ids_by_name = {cat.name: cat.id for cat in user_categories}
     category_kind_by_id = {cat.id: cat.kind for cat in user_categories}
 
@@ -297,7 +298,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         account_id=pluggy_acct.id
                     )
                     bills_data = json.loads(raw_bills.data).get("results") or []
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     # Bills só existem em conexões Open Finance Regulado — degrada
                     # para lista vazia quando a conexão não as suporta, mas loga:
                     # sem isso não há como distinguir "conector não expõe faturas"
@@ -360,16 +361,19 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                 # Depois das faturas fechadas: a reconstrução do ciclo aberto se
                 # apoia na última delas para saber o dia de vencimento do cartão.
                 try:
-                    if bill_service.upsert_open_bill(
-                        db,
-                        account.user_id,
-                        account,
-                        pluggy_acct.id,
-                        raw_card_transactions,
-                        card_name=card_name,
-                    ) is not None:
+                    if (
+                        bill_service.upsert_open_bill(
+                            db,
+                            account.user_id,
+                            account,
+                            pluggy_acct.id,
+                            raw_card_transactions,
+                            card_name=card_name,
+                        )
+                        is not None
+                    ):
                         open_bills_synced += 1
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     # Estimativa é acessório: falhar aqui não pode derrubar o
                     # sync de transações e faturas, que são o dado oficial.
                     db.rollback()
@@ -398,9 +402,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         category_id = None
         for keyword, mapped_id in keyword_map.items():
             if keyword in normalized:
-                category_id = _category_for_direction(
-                    UUID(mapped_id), tx_type, category_kind_by_id
-                )
+                category_id = _category_for_direction(UUID(mapped_id), tx_type, category_kind_by_id)
                 if category_id is not None:
                     break
         if category_id is None:

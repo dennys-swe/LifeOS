@@ -20,9 +20,7 @@ class Budget(Base):
     user_id: Mapped[Uuid] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    category_id: Mapped[Uuid] = mapped_column(
-        Uuid, ForeignKey("categories.id"), nullable=False
-    )
+    category_id: Mapped[Uuid] = mapped_column(Uuid, ForeignKey("categories.id"), nullable=False)
     month: Mapped[int] = mapped_column(Integer, nullable=False)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     limit_amount: Mapped[Numeric] = mapped_column(Numeric(12, 2), nullable=False)

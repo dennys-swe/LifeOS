@@ -86,8 +86,10 @@ def scrub_dir(path: Path, dry_run: bool) -> None:
         if not dry_run:
             f.write_text(json.dumps(cleaned, indent=2, ensure_ascii=False))
     verb = "trocaria" if dry_run else "trocou"
-    print(f"{path.name}: {verb} {scrubber.changes} valores "
-          f"({len(scrubber._ids)} ids, {len(scrubber._people)} nomes).")
+    print(
+        f"{path.name}: {verb} {scrubber.changes} valores "
+        f"({len(scrubber._ids)} ids, {len(scrubber._people)} nomes)."
+    )
     if scrubber._people:
         print("  nomes → " + ", ".join(f"{k!r}→{v}" for k, v in scrubber._people.items()))
     print("  Revise transactions.json à mão: valores monetários NÃO são alterados.")

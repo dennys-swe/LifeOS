@@ -2,6 +2,8 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from app.models.bank_account import BankAccount
 from app.models.credit_card_bill import CreditCardBill
 from app.models.payable import Payable, PayableStatus
@@ -80,7 +82,9 @@ def _bill_payable(db_session, user, amount, due_date):
     """Cria um payable de fatura (linkado a um CreditCardBill), diferente de
     _payable — é o que ativa a heurística de "eco" de pagamento de fatura."""
     p = _payable(db_session, user, amount, due_date)
-    acc = BankAccount(user_id=user.id, name="Cartão", bank_name="Banco Teste", account_type="credit")
+    acc = BankAccount(
+        user_id=user.id, name="Cartão", bank_name="Banco Teste", account_type="credit"
+    )
     db_session.add(acc)
     db_session.commit()
     db_session.refresh(acc)
@@ -174,11 +178,8 @@ def test_confirm_reconciliation_rejects_other_users_payable(db_session, user, ot
     p = _payable(db_session, other_user, 150, date(2026, 5, 10))
     t = _transaction(db_session, user, 150, date(2026, 5, 12))
 
-    try:
+    with pytest.raises(ValueError):
         confirm_reconciliation(db_session, user.id, transaction_id=t.id, payable_id=p.id)
-        assert False, "expected ValueError"
-    except ValueError:
-        pass
 
 
 def test_auto_reconcile_confirms_unique_exact_match(db_session, user):
@@ -215,12 +216,18 @@ def test_auto_reconcile_resolves_bill_payment_echo(db_session, user):
     confirmar sozinho o débito real sem precisar de revisão manual."""
     p = _bill_payable(db_session, user, Decimal("655.34"), date(2026, 5, 10))
     real_tx = Transaction(
-        user_id=user.id, date=date(2026, 5, 10), description="FATURA PAGA CARTAO LUIZA",
-        amount=Decimal("655.34"), type=TransactionType.EXPENSE,
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="FATURA PAGA CARTAO LUIZA",
+        amount=Decimal("655.34"),
+        type=TransactionType.EXPENSE,
     )
     echo_tx = Transaction(
-        user_id=user.id, date=date(2026, 5, 10), description="Pagamento recebido",
-        amount=Decimal("655.34"), type=TransactionType.EXPENSE,
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="Pagamento recebido",
+        amount=Decimal("655.34"),
+        type=TransactionType.EXPENSE,
     )
     db_session.add_all([real_tx, echo_tx])
     db_session.commit()
@@ -240,12 +247,18 @@ def test_auto_reconcile_does_not_resolve_echo_for_non_bill_payables(db_session, 
     continuam ambíguas e exigem revisão manual."""
     p = _payable(db_session, user, Decimal("655.34"), date(2026, 5, 10))
     real_tx = Transaction(
-        user_id=user.id, date=date(2026, 5, 10), description="FATURA PAGA CARTAO LUIZA",
-        amount=Decimal("655.34"), type=TransactionType.EXPENSE,
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="FATURA PAGA CARTAO LUIZA",
+        amount=Decimal("655.34"),
+        type=TransactionType.EXPENSE,
     )
     echo_tx = Transaction(
-        user_id=user.id, date=date(2026, 5, 10), description="Pagamento recebido",
-        amount=Decimal("655.34"), type=TransactionType.EXPENSE,
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="Pagamento recebido",
+        amount=Decimal("655.34"),
+        type=TransactionType.EXPENSE,
     )
     db_session.add_all([real_tx, echo_tx])
     db_session.commit()
@@ -263,12 +276,18 @@ def test_auto_reconcile_does_not_resolve_echo_when_both_generic(db_session, user
     sobra), continua ambíguo — não escolhe às cegas."""
     p = _bill_payable(db_session, user, Decimal("655.34"), date(2026, 5, 10))
     echo1 = Transaction(
-        user_id=user.id, date=date(2026, 5, 10), description="Pagamento recebido",
-        amount=Decimal("655.34"), type=TransactionType.EXPENSE,
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="Pagamento recebido",
+        amount=Decimal("655.34"),
+        type=TransactionType.EXPENSE,
     )
     echo2 = Transaction(
-        user_id=user.id, date=date(2026, 5, 10), description="PAGAMENTO COM SALDO",
-        amount=Decimal("655.34"), type=TransactionType.EXPENSE,
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="PAGAMENTO COM SALDO",
+        amount=Decimal("655.34"),
+        type=TransactionType.EXPENSE,
     )
     db_session.add_all([echo1, echo2])
     db_session.commit()
@@ -290,7 +309,7 @@ def test_suggest_suppresses_approx_match_when_exact_match_exists(db_session, use
     """Observado em dados reais: um Pix de R$ 650 pra outra pessoa coincidiu
     (dentro da tolerância de 5%) com uma fatura de R$ 655,34 que já tinha um
     candidato de valor exato — o aproximado é ruído e não deveria aparecer."""
-    p = _payable(db_session, user, Decimal("655.34"), date(2026, 5, 10))
+    _payable(db_session, user, Decimal("655.34"), date(2026, 5, 10))
     exact_tx = _transaction(db_session, user, Decimal("655.34"), date(2026, 5, 10))
     approx_tx = _transaction(db_session, user, Decimal("650.00"), date(2026, 5, 10))
 
@@ -351,12 +370,18 @@ def test_suggest_pending_auto_resolves_old_bill_payment_echoes(db_session, user)
     sozinho ao ser chamado, não só o que o sync mais recente trouxe."""
     p = _bill_payable(db_session, user, Decimal("655.34"), date(2026, 5, 10))
     real_tx = Transaction(
-        user_id=user.id, date=date(2026, 5, 10), description="FATURA PAGA CARTAO LUIZA",
-        amount=Decimal("655.34"), type=TransactionType.EXPENSE,
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="FATURA PAGA CARTAO LUIZA",
+        amount=Decimal("655.34"),
+        type=TransactionType.EXPENSE,
     )
     echo_tx = Transaction(
-        user_id=user.id, date=date(2026, 5, 10), description="Pagamento recebido",
-        amount=Decimal("655.34"), type=TransactionType.EXPENSE,
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="Pagamento recebido",
+        amount=Decimal("655.34"),
+        type=TransactionType.EXPENSE,
     )
     db_session.add_all([real_tx, echo_tx])
     db_session.commit()

@@ -20,8 +20,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 os.environ.setdefault("ENVIRONMENT", "test")
 
 from app.core.users import current_active_user
-from app.db.database import Base
-from app.db.database import get_db
+from app.db.database import Base, get_db
 from app.main import app
 from app.models.user import User
 

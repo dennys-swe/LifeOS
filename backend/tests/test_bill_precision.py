@@ -50,7 +50,9 @@ def _cases() -> list:
                 if c.get("status") == "xfail"
                 else []
             )
-            params.append(pytest.param(d, competencia, c, id=f"{d.name}::{competencia}", marks=marks))
+            params.append(
+                pytest.param(d, competencia, c, id=f"{d.name}::{competencia}", marks=marks)
+            )
     return params
 
 

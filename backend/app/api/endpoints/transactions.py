@@ -85,9 +85,7 @@ def update_transaction_fields(
     category_id = changes.get("category_id")
     if category_id is not None:
         owned = db.execute(
-            select(Category).where(
-                Category.id == category_id, Category.user_id == user.id
-            )
+            select(Category).where(Category.id == category_id, Category.user_id == user.id)
         ).scalar_one_or_none()
         if owned is None:
             raise HTTPException(status_code=404, detail="Categoria não encontrada.")

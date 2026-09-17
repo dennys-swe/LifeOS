@@ -61,7 +61,7 @@ def _bills(bill_api: pluggy_sdk.BillApi, account_id: str) -> list[dict]:
     try:
         raw = bill_api.bills_list_without_preload_content(account_id=account_id)
         return json.loads(raw.data).get("results") or []
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"  bills indisponíveis: {type(exc).__name__}: {exc}")
         return []
 
@@ -79,14 +79,16 @@ def capture(item_id: str, slug: str) -> None:
             return
 
         for i, acct in enumerate(credit):
-            name = (getattr(acct, "marketing_name", None) or getattr(acct, "name", None) or slug)
+            name = getattr(acct, "marketing_name", None) or getattr(acct, "name", None) or slug
             out_dir = _OUT_ROOT / (slug if len(credit) == 1 else f"{slug}-{i + 1}")
             out_dir.mkdir(parents=True, exist_ok=True)
 
             transactions = _all_transactions(tx_api, acct.id)
             bills = _bills(bill_api, acct.id)
 
-            (out_dir / "transactions.json").write_text(json.dumps(transactions, indent=2, default=str))
+            (out_dir / "transactions.json").write_text(
+                json.dumps(transactions, indent=2, default=str)
+            )
             (out_dir / "bills.json").write_text(json.dumps(bills, indent=2, default=str))
             (out_dir / "capture.yaml").write_text(
                 f'card: "{name}"\n'

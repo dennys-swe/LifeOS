@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.credit_card_bill import CreditCardBill, CreditCardBillStatus
 from app.models.payable import Payable, PayableStatus
-from app.schemas.payable import PayableOrigin, PayableCreate, PayableUpdate
+from app.schemas.payable import PayableCreate, PayableOrigin, PayableUpdate
 
 
 def create_payable(db: Session, user_id: UUID, payload: PayableCreate) -> Payable:
@@ -30,9 +30,7 @@ def list_payables(
         start_date = date(year, month, 1)
         end_day = monthrange(year, month)[1]
         end_date = date(year, month, end_day)
-        query = query.where(Payable.due_date >= start_date).where(
-            Payable.due_date <= end_date
-        )
+        query = query.where(Payable.due_date >= start_date).where(Payable.due_date <= end_date)
 
     result = db.execute(query.order_by(Payable.due_date.asc()))
     return annotate_origin(db, result.scalars().all())

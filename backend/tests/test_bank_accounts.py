@@ -1,13 +1,13 @@
 """Testes manuais da integração Pluggy — endpoints e serviço de bank accounts."""
+
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
-
-import json
 
 import pytest
 
@@ -19,10 +19,10 @@ from app.schemas.category_rule import CategoryRuleCreate
 from app.services import bank_sync_service
 from app.services.category_rule_service import create_rule
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_account(db, user, *, external_id: str | None = None) -> BankAccount:
     acc = BankAccount(
@@ -71,6 +71,7 @@ def _page_raw(results, total_pages=1):
 # ---------------------------------------------------------------------------
 # CRUD — sem dependência da Pluggy
 # ---------------------------------------------------------------------------
+
 
 class TestBankAccountCRUD:
     def test_list_empty(self, client):
@@ -156,6 +157,7 @@ class TestBankAccountCRUD:
 # connector.name == "MeuPluggy", igual para todo banco conectado.
 # ---------------------------------------------------------------------------
 
+
 class TestNameDerivation:
     def _ctx(self):
         ctx = MagicMock()
@@ -209,7 +211,9 @@ class TestNameDerivation:
         assert r.json()["bank_name"] == "banco-x"
 
     def test_long_label_list_is_truncated_with_count(self, client):
-        accounts = [self._pluggy_acct(f"Cartão de crédito muito longo numero {i}") for i in range(6)]
+        accounts = [
+            self._pluggy_acct(f"Cartão de crédito muito longo numero {i}") for i in range(6)
+        ]
 
         r = self._connect(client, accounts)
 
@@ -267,6 +271,7 @@ class TestNameDerivation:
 # connect-token
 # ---------------------------------------------------------------------------
 
+
 class TestConnectToken:
     @patch("app.api.endpoints.bank_accounts.bank_sync_service.get_connect_token")
     def test_connect_token_without_item_id(self, mock_token, client):
@@ -286,7 +291,9 @@ class TestConnectToken:
 
     @patch("app.api.endpoints.bank_accounts.bank_sync_service.get_connect_token")
     def test_connect_token_missing_credentials_returns_503(self, mock_token, client):
-        mock_token.side_effect = RuntimeError("PLUGGY_CLIENT_ID e PLUGGY_CLIENT_SECRET não configurados")
+        mock_token.side_effect = RuntimeError(
+            "PLUGGY_CLIENT_ID e PLUGGY_CLIENT_SECRET não configurados"
+        )
         r = client.post("/bank-accounts/connect-token")
         assert r.status_code == 503
 
@@ -294,6 +301,7 @@ class TestConnectToken:
 # ---------------------------------------------------------------------------
 # sync endpoint
 # ---------------------------------------------------------------------------
+
 
 class TestSyncEndpoint:
     @patch("app.api.endpoints.bank_accounts.bank_sync_service.sync_account")
@@ -326,7 +334,7 @@ class TestSyncEndpoint:
         assert "item_id" in r.json()["detail"]
 
     def test_sync_already_syncing_is_idempotent(self, client, db_session, user):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         acc = _make_account(db_session, user, external_id=str(uuid4()))
         acc.sync_status = BankAccountSyncStatus.SYNCING
@@ -340,7 +348,7 @@ class TestSyncEndpoint:
 
     @patch("app.api.endpoints.bank_accounts.bank_sync_service.run_sync_job")
     def test_sync_breaks_stale_lock(self, mock_job, client, db_session, user):
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         acc = _make_account(db_session, user, external_id=str(uuid4()))
         acc.sync_status = BankAccountSyncStatus.SYNCING
@@ -374,6 +382,7 @@ class TestSyncEndpoint:
 # bank_sync_service.sync_account — unit tests
 # ---------------------------------------------------------------------------
 
+
 class TestSyncAccountService:
     def _make_api_client_ctx(self):
         """Retorna um MagicMock que funciona como context manager."""
@@ -397,8 +406,12 @@ class TestSyncAccountService:
             patch("app.services.bank_sync_service.get_api_client", return_value=ctx),
             patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
         ):
-            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
-            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([tx1, tx2])
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+                results=[pluggy_acc]
+            )
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw(
+                [tx1, tx2]
+            )
 
             result = bank_sync_service.sync_account(db_session, acc)
 
@@ -429,11 +442,18 @@ class TestSyncAccountService:
         tx_new = _pluggy_tx("tx-new", -30.0, "Farmácia", date(2026, 5, 2))
 
         with (
-            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch(
+                "app.services.bank_sync_service.get_api_client",
+                return_value=self._make_api_client_ctx(),
+            ),
             patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
         ):
-            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
-            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([tx_dup, tx_new])
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+                results=[pluggy_acc]
+            )
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw(
+                [tx_dup, tx_new]
+            )
 
             result = bank_sync_service.sync_account(db_session, acc)
 
@@ -448,11 +468,18 @@ class TestSyncAccountService:
         tx_income = _pluggy_tx("tx-inc", 5000.0, "Transferência recebida", date(2026, 5, 4))
 
         with (
-            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch(
+                "app.services.bank_sync_service.get_api_client",
+                return_value=self._make_api_client_ctx(),
+            ),
             patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
         ):
-            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
-            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([tx_expense, tx_income])
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+                results=[pluggy_acc]
+            )
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw(
+                [tx_expense, tx_income]
+            )
 
             bank_sync_service.sync_account(db_session, acc)
 
@@ -466,8 +493,12 @@ class TestSyncAccountService:
         acc = _make_account(db_session, user, external_id=str(uuid4()))
 
         pluggy_acc = SimpleNamespace(id=str(uuid4()))
-        page1_txs = [_pluggy_tx(f"tx-p1-{i}", -10.0, f"Desc {i}", date(2026, 5, i + 1)) for i in range(3)]
-        page2_txs = [_pluggy_tx(f"tx-p2-{i}", -20.0, f"Desc2 {i}", date(2026, 5, i + 10)) for i in range(2)]
+        page1_txs = [
+            _pluggy_tx(f"tx-p1-{i}", -10.0, f"Desc {i}", date(2026, 5, i + 1)) for i in range(3)
+        ]
+        page2_txs = [
+            _pluggy_tx(f"tx-p2-{i}", -20.0, f"Desc2 {i}", date(2026, 5, i + 10)) for i in range(2)
+        ]
 
         call_count = 0
 
@@ -479,10 +510,15 @@ class TestSyncAccountService:
             return _page_raw(page2_txs, total_pages=2)
 
         with (
-            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch(
+                "app.services.bank_sync_service.get_api_client",
+                return_value=self._make_api_client_ctx(),
+            ),
             patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
         ):
-            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+                results=[pluggy_acc]
+            )
             mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.side_effect = fake_list
 
             result = bank_sync_service.sync_account(db_session, acc)
@@ -497,11 +533,18 @@ class TestSyncAccountService:
         pluggy_acc = SimpleNamespace(id=str(uuid4()))
 
         with (
-            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch(
+                "app.services.bank_sync_service.get_api_client",
+                return_value=self._make_api_client_ctx(),
+            ),
             patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
         ):
-            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
-            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([])
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+                results=[pluggy_acc]
+            )
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw(
+                []
+            )
 
             bank_sync_service.sync_account(db_session, acc)
 
@@ -521,11 +564,18 @@ class TestSyncAccountService:
         tx = _pluggy_tx("tx-long", -1.0, long_desc, date(2026, 5, 1))
 
         with (
-            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch(
+                "app.services.bank_sync_service.get_api_client",
+                return_value=self._make_api_client_ctx(),
+            ),
             patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
         ):
-            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
-            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([tx])
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+                results=[pluggy_acc]
+            )
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw(
+                [tx]
+            )
 
             bank_sync_service.sync_account(db_session, acc)
 
@@ -538,17 +588,26 @@ class TestSyncAccountService:
         db_session.add(cat)
         db_session.commit()
         db_session.refresh(cat)
-        create_rule(db_session, user.id, CategoryRuleCreate(keyword="pao de acucar", category_id=cat.id))
+        create_rule(
+            db_session, user.id, CategoryRuleCreate(keyword="pao de acucar", category_id=cat.id)
+        )
 
         pluggy_acc = SimpleNamespace(id=str(uuid4()))
         tx = _pluggy_tx("tx-cat", -150.0, "Pao de Acucar Compra", date(2026, 5, 1))
 
         with (
-            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch(
+                "app.services.bank_sync_service.get_api_client",
+                return_value=self._make_api_client_ctx(),
+            ),
             patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
         ):
-            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
-            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([tx])
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+                results=[pluggy_acc]
+            )
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw(
+                [tx]
+            )
 
             bank_sync_service.sync_account(db_session, acc)
 
@@ -572,11 +631,18 @@ class TestSyncAccountService:
         tx = _pluggy_tx("tx-exact", -99.90, "Pagto Internet", date(2026, 5, 10))
 
         with (
-            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch(
+                "app.services.bank_sync_service.get_api_client",
+                return_value=self._make_api_client_ctx(),
+            ),
             patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
         ):
-            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
-            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([tx])
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+                results=[pluggy_acc]
+            )
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw(
+                [tx]
+            )
 
             result = bank_sync_service.sync_account(db_session, acc)
 
@@ -604,11 +670,18 @@ class TestSyncAccountService:
         tx = _pluggy_tx("tx-ambig", -99.90, "Pagto Internet", date(2026, 5, 10))
 
         with (
-            patch("app.services.bank_sync_service.get_api_client", return_value=self._make_api_client_ctx()),
+            patch(
+                "app.services.bank_sync_service.get_api_client",
+                return_value=self._make_api_client_ctx(),
+            ),
             patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
         ):
-            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
-            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw([tx])
+            mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+                results=[pluggy_acc]
+            )
+            mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _page_raw(
+                [tx]
+            )
 
             result = bank_sync_service.sync_account(db_session, acc)
 

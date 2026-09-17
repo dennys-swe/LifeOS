@@ -27,22 +27,26 @@ def _normalize_description(description: str) -> str:
 
 
 def detect_recurring_candidates(db: Session, user_id: UUID) -> List[RecurringSuggestion]:
-    transactions = db.execute(
-        select(Transaction).where(
-            Transaction.user_id == user_id,
-            Transaction.type == TransactionType.EXPENSE,
-            # Transferência recorrente entre as próprias contas não é conta a
-            # pagar — e é volumosa (219 "Same person transfer" no extrato real
-            # do dono), então dominava as sugestões.
-            Transaction.is_transfer.is_(False),
+    transactions = (
+        db.execute(
+            select(Transaction).where(
+                Transaction.user_id == user_id,
+                Transaction.type == TransactionType.EXPENSE,
+                # Transferência recorrente entre as próprias contas não é conta a
+                # pagar — e é volumosa (219 "Same person transfer" no extrato real
+                # do dono), então dominava as sugestões.
+                Transaction.is_transfer.is_(False),
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     existing_titles = {
         rec.title.strip().upper()
-        for rec in db.execute(
-            select(RecurringPayable).where(RecurringPayable.user_id == user_id)
-        ).scalars().all()
+        for rec in db.execute(select(RecurringPayable).where(RecurringPayable.user_id == user_id))
+        .scalars()
+        .all()
     }
 
     groups: dict[str, list[Transaction]] = defaultdict(list)
@@ -54,7 +58,7 @@ def detect_recurring_candidates(db: Session, user_id: UUID) -> List[RecurringSug
 
     suggestions: List[RecurringSuggestion] = []
 
-    for key, txs in groups.items():
+    for _key, txs in groups.items():
         distinct_months = {(tx.date.year, tx.date.month) for tx in txs}
         if len(distinct_months) < MIN_DISTINCT_MONTHS:
             continue

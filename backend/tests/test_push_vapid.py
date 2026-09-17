@@ -5,6 +5,7 @@ acontecia **antes** de qualquer requisição sair, então a subscription jamais 
 rejeitada pelo navegador e nada indicava falha — o job reportava sucesso e o
 único sintoma era o silêncio no aparelho.
 """
+
 from __future__ import annotations
 
 import pytest

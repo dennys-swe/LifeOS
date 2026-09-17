@@ -35,41 +35,51 @@ def run(db: Optional[Session] = None) -> dict:
     errors = 0
 
     try:
-        users = db.execute(
-            select(User).where(User.is_active == True)  # noqa: E712
-        ).scalars().all()
+        users = (
+            db.execute(
+                select(User).where(User.is_active == True)  # noqa: E712
+            )
+            .scalars()
+            .all()
+        )
         today = date.today()
         logger.info("daily_sync iniciado: %s usuário(s) ativo(s)", len(users))
 
         for user in users:
             processed_users += 1
 
-            accounts = db.execute(
-                select(BankAccount).where(
-                    BankAccount.user_id == user.id,
-                    BankAccount.external_id.is_not(None),
+            accounts = (
+                db.execute(
+                    select(BankAccount).where(
+                        BankAccount.user_id == user.id,
+                        BankAccount.external_id.is_not(None),
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             for account in accounts:
                 try:
                     bank_sync_service.sync_account(db, account)
                     synced_accounts += 1
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     errors += 1
                     logger.exception(
                         "sync falhou (user=%s account=%s): %s", user.id, account.id, exc
                     )
 
             try:
-                recurring_service.generate_for_month(db, user.id, month=today.month, year=today.year)
-            except Exception as exc:  # noqa: BLE001
+                recurring_service.generate_for_month(
+                    db, user.id, month=today.month, year=today.year
+                )
+            except Exception as exc:
                 errors += 1
                 logger.exception("generate_for_month falhou (user=%s): %s", user.id, exc)
 
             try:
                 push_service.send_upcoming_notifications(db, user.id, days=3)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors += 1
                 logger.exception("push falhou (user=%s): %s", user.id, exc)
 

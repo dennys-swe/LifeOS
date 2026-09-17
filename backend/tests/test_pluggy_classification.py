@@ -5,10 +5,10 @@ sinal não é consistente entre tipos de conta — em cartão de crédito a comp
 positiva. Resultado nos dados reais: 1584 transações que a Pluggy marca DEBIT
 estavam gravadas como INCOME/EXPENSE ao contrário, mais da metade do extrato.
 """
+
 from __future__ import annotations
 
 import json
-from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -41,9 +41,7 @@ def _account(db, user) -> BankAccount:
 
 
 def _raw_page(txs):
-    return SimpleNamespace(
-        data=json.dumps({"results": txs, "totalPages": 1}).encode()
-    )
+    return SimpleNamespace(data=json.dumps({"results": txs, "totalPages": 1}).encode())
 
 
 def _tx(tx_id, amount, description, *, tipo=None, category=None, dia="2026-07-10"):
@@ -76,13 +74,16 @@ def _sync(db, acc, txs, *, account_type="BANK"):
         mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
             results=[pluggy_acct]
         )
-        mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _raw_page(txs)
+        mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _raw_page(
+            txs
+        )
         return bank_sync_service.sync_account(db, acc)
 
 
 # ---------------------------------------------------------------------------
 # Tipo: vem do campo `type` da Pluggy, não do sinal
 # ---------------------------------------------------------------------------
+
 
 def test_credit_card_purchase_is_expense_despite_positive_amount(db_session, user):
     """O bug original: compra de cartão vem POSITIVA com type=DEBIT."""
@@ -136,6 +137,7 @@ def test_falls_back_to_sign_when_type_absent(db_session, user):
 # ---------------------------------------------------------------------------
 # Transferência: dinheiro que só muda de lugar
 # ---------------------------------------------------------------------------
+
 
 def test_credit_card_payment_is_marked_transfer(db_session, user):
     acc = _account(db_session, user)
@@ -207,6 +209,7 @@ def test_investment_is_transfer_not_expense(db_session, user):
 # Categoria: aproveita a classificação que a Pluggy já entrega
 # ---------------------------------------------------------------------------
 
+
 def test_pluggy_category_is_mapped_to_user_category(db_session, user):
     acc = _account(db_session, user)
 
@@ -229,7 +232,9 @@ def test_missing_default_categories_are_created_on_sync(db_session, user):
         db_session.delete(cat)
     db_session.commit()
 
-    _sync(db_session, acc, [_tx("t1", -35.0, "FARMACIA CENTRAL", tipo="DEBIT", category="Pharmacy")])
+    _sync(
+        db_session, acc, [_tx("t1", -35.0, "FARMACIA CENTRAL", tipo="DEBIT", category="Pharmacy")]
+    )
 
     tx = db_session.query(Transaction).one()
     assert db_session.get(Category, tx.category_id).name == "Saúde"
@@ -280,6 +285,7 @@ def test_unmapped_category_is_stored_but_left_uncategorized(db_session, user):
 # O mapa em si
 # ---------------------------------------------------------------------------
 
+
 def test_map_targets_only_existing_default_categories():
     """Todo destino do mapa tem que ser uma categoria que o seed cria — senão
     a transação fica sem categoria silenciosamente."""
@@ -292,8 +298,8 @@ def test_map_targets_only_existing_default_categories():
 
 def test_transfer_and_mapped_categories_do_not_overlap():
     """Uma categoria não pode ser transferência E gasto categorizado."""
-    assert not (TRANSFER_CATEGORIES & set(PLUGGY_TO_CATEGORY)), (
-        TRANSFER_CATEGORIES & set(PLUGGY_TO_CATEGORY)
+    assert not (TRANSFER_CATEGORIES & set(PLUGGY_TO_CATEGORY)), TRANSFER_CATEGORIES & set(
+        PLUGGY_TO_CATEGORY
     )
 
 
@@ -391,7 +397,7 @@ def test_bill_payment_is_excluded_from_spending(db_session, user):
 
 
 def test_overdue_balance_rollover_is_transfer_not_new_expense():
-    """"Saldo em atraso" é o saldo devedor do rotativo rolado do mês anterior,
+    """ "Saldo em atraso" é o saldo devedor do rotativo rolado do mês anterior,
     não um gasto novo — a compra que o originou já entrou como gasto quando
     aconteceu. A Pluggy classifica junto com juros/multa/IOF de atraso em
     "Late payment and overdraft costs" (-> Taxas); sem distinguir pela
@@ -412,6 +418,7 @@ def test_overdue_balance_rollover_is_transfer_not_new_expense():
 # ids diferentes — dedup por `source=pluggy:{id}` não pega porque o id muda.
 # ---------------------------------------------------------------------------
 
+
 def _sync_multi(db, acc, accounts: list[tuple[str, list[dict]]]):
     """Sincroniza várias pluggy accounts do mesmo item numa única chamada.
 
@@ -423,7 +430,7 @@ def _sync_multi(db, acc, accounts: list[tuple[str, list[dict]]]):
         SimpleNamespace(id=str(uuid4()), type=account_type, name=f"conta-{i}")
         for i, (account_type, _) in enumerate(accounts)
     ]
-    txs_by_account_id = {pa.id: txs for pa, (_, txs) in zip(pluggy_accts, accounts)}
+    txs_by_account_id = {pa.id: txs for pa, (_, txs) in zip(pluggy_accts, accounts, strict=True)}
 
     def _transactions_list(account_id, page, page_size):
         return _raw_page(txs_by_account_id[account_id])
@@ -435,9 +442,7 @@ def _sync_multi(db, acc, accounts: list[tuple[str, list[dict]]]):
         mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
             results=pluggy_accts
         )
-        mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.side_effect = (
-            _transactions_list
-        )
+        mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.side_effect = _transactions_list
         return bank_sync_service.sync_account(db, acc)
 
 
@@ -469,7 +474,18 @@ def test_cross_feed_duplicate_between_checking_and_credit_is_deduped(db_session,
         db_session,
         acc,
         [
-            ("BANK", [_tx("93e66b22", 208.32, "Compra débito MERCADINHO", tipo="DEBIT", dia="2026-08-08")]),
+            (
+                "BANK",
+                [
+                    _tx(
+                        "93e66b22",
+                        208.32,
+                        "Compra débito MERCADINHO",
+                        tipo="DEBIT",
+                        dia="2026-08-08",
+                    )
+                ],
+            ),
             ("CREDIT", [_tx("16829b82", 208.32, "MERCADINHO", tipo="DEBIT", dia="2026-08-09")]),
         ],
     )

@@ -35,4 +35,3 @@ class CreditCardBillUpdate(BaseModel):
     # campo não mexe nele (o PATCH usa `exclude_unset`), senão editar a cor
     # apagaria o apelido e vice-versa.
     custom_color_hex: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
-

@@ -92,11 +92,17 @@ def test_upsert_bill_reuses_existing_bill_when_pluggy_reissues_external_id(db_se
     tem uma fatura por mês, tratamos isso como a mesma fatura."""
     acc = _make_account(db_session, user)
     first = bill_service.upsert_bill(
-        db_session, user.id, acc, "pluggy-acc-1",
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
         _bill_payload(bill_id="bill-original", due_date=_iso(_in_window(10)), total_amount=655.34),
     )
     second = bill_service.upsert_bill(
-        db_session, user.id, acc, "pluggy-acc-1",
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
         _bill_payload(bill_id="bill-reissued", due_date=_iso(_in_window(11)), total_amount=655.34),
     )
 
@@ -112,11 +118,17 @@ def test_upsert_bill_reuses_existing_bill_when_pluggy_reissues_external_id(db_se
 def test_upsert_bill_does_not_merge_bills_from_different_cards(db_session, user):
     acc = _make_account(db_session, user)
     bill_service.upsert_bill(
-        db_session, user.id, acc, "pluggy-acc-1",
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
         _bill_payload(bill_id="bill-card-1", due_date="2026-05-10T00:00:00Z", total_amount=655.34),
     )
     bill_service.upsert_bill(
-        db_session, user.id, acc, "pluggy-acc-2",
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-2",
         _bill_payload(bill_id="bill-card-2", due_date="2026-05-11T00:00:00Z", total_amount=472.95),
     )
 
@@ -126,7 +138,9 @@ def test_upsert_bill_does_not_merge_bills_from_different_cards(db_session, user)
 
 def test_upsert_bill_updates_amount_on_resync(db_session, user):
     acc = _make_account(db_session, user)
-    bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=850.0))
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=850.0)
+    )
     updated = bill_service.upsert_bill(
         db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=920.0)
     )
@@ -138,13 +152,17 @@ def test_upsert_bill_updates_amount_on_resync(db_session, user):
 
 def test_upsert_bill_does_not_update_paid_payable(db_session, user):
     acc = _make_account(db_session, user)
-    bill = bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=850.0))
+    bill = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=850.0)
+    )
     payable = db_session.get(Payable, bill.payable_id)
     payable.status = PayableStatus.PAID
     db_session.add(payable)
     db_session.commit()
 
-    bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=920.0))
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=920.0)
+    )
     db_session.refresh(payable)
     assert payable.amount == Decimal("850.00")
 
@@ -178,7 +196,12 @@ def test_two_cards_same_month_get_distinct_titles(db_session, user):
         db_session, user.id, acc, "pluggy-acc-1", _bill_payload("bill-a"), card_name="Cartão Loja"
     )
     bill_b = bill_service.upsert_bill(
-        db_session, user.id, acc, "pluggy-acc-2", _bill_payload("bill-b"), card_name="Cartão Platinum"
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-2",
+        _bill_payload("bill-b"),
+        card_name="Cartão Platinum",
     )
 
     title_a = db_session.get(Payable, bill_a.payable_id).title
@@ -286,9 +309,19 @@ def test_is_in_payable_window_crosses_year():
 def test_list_bills_filters_by_month_and_user(db_session, user, other_user):
     acc = _make_account(db_session, user)
     other_acc = _make_account(db_session, other_user)
-    bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload("bill-aug", "2026-08-10T00:00:00Z"))
-    bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload("bill-sep", "2026-09-10T00:00:00Z"))
-    bill_service.upsert_bill(db_session, other_user.id, other_acc, "pluggy-acc-2", _bill_payload("bill-other", "2026-08-15T00:00:00Z"))
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload("bill-aug", "2026-08-10T00:00:00Z")
+    )
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload("bill-sep", "2026-09-10T00:00:00Z")
+    )
+    bill_service.upsert_bill(
+        db_session,
+        other_user.id,
+        other_acc,
+        "pluggy-acc-2",
+        _bill_payload("bill-other", "2026-08-15T00:00:00Z"),
+    )
 
     august_bills = bill_service.list_bills(db_session, user.id, month=8, year=2026)
     assert len(august_bills) == 1
@@ -328,7 +361,9 @@ def test_sync_account_imports_bills_for_credit_accounts(db_session, user):
         patch("app.services.bank_sync_service.get_api_client", return_value=_make_api_client_ctx()),
         patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
     ):
-        mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pluggy_acc])
+        mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+            results=[pluggy_acc]
+        )
         mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = tx_raw
         mock_sdk.BillApi.return_value.bills_list_without_preload_content.return_value = bills_raw
 
@@ -348,7 +383,11 @@ def test_update_card_alias_updates_all_bills_and_payables(client, db_session, us
         db_session, user.id, acc, "pluggy-acc-inter", _bill_payload("b1", _iso(_in_window(10)))
     )
     bill2 = bill_service.upsert_bill(
-        db_session, user.id, acc, "pluggy-acc-inter", _bill_payload("b2", _iso(_in_window(10, months_ahead=1)))
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-inter",
+        _bill_payload("b2", _iso(_in_window(10, months_ahead=1))),
     )
 
     resp = client.patch(f"/credit-card-bills/{bill1.id}", json={"custom_card_name": "Inter Black"})
@@ -366,22 +405,27 @@ def test_update_card_alias_updates_all_bills_and_payables(client, db_session, us
     assert "Fatura Inter Black —" in payable2.title
 
 
-
 def test_update_card_color_applies_to_all_bills_of_the_card(client, db_session, user):
     acc = _make_account(db_session, user)
     bill1 = bill_service.upsert_bill(
         db_session, user.id, acc, "pluggy-acc-1", _bill_payload("b1", _iso(_in_window(10)))
     )
     bill_service.upsert_bill(
-        db_session, user.id, acc, "pluggy-acc-1", _bill_payload("b2", _iso(_in_window(10, months_ahead=1)))
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        _bill_payload("b2", _iso(_in_window(10, months_ahead=1))),
     )
 
     response = client.patch(f"/credit-card-bills/{bill1.id}", json={"custom_color_hex": "#7c3aed"})
     assert response.status_code == 200
 
-    bills = db_session.query(CreditCardBill).filter(
-        CreditCardBill.pluggy_account_id == "pluggy-acc-1"
-    ).all()
+    bills = (
+        db_session.query(CreditCardBill)
+        .filter(CreditCardBill.pluggy_account_id == "pluggy-acc-1")
+        .all()
+    )
     assert {b.custom_color_hex for b in bills} == {"#7c3aed"}
 
 
@@ -425,9 +469,10 @@ def test_rejects_malformed_color(client, db_session, user):
     acc = _make_account(db_session, user)
     bill = bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload())
 
-    assert client.patch(
-        f"/credit-card-bills/{bill.id}", json={"custom_color_hex": "roxo"}
-    ).status_code == 422
+    assert (
+        client.patch(f"/credit-card-bills/{bill.id}", json={"custom_color_hex": "roxo"}).status_code
+        == 422
+    )
 
 
 def test_new_bill_inherits_card_color(db_session, user):
@@ -439,7 +484,10 @@ def test_new_bill_inherits_card_color(db_session, user):
     )
 
     later = bill_service.upsert_bill(
-        db_session, user.id, acc, "pluggy-acc-1",
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
         _bill_payload("b2", _iso(_in_window(10, months_ahead=1))),
     )
 
@@ -448,32 +496,55 @@ def test_new_bill_inherits_card_color(db_session, user):
 
 def test_explain_open_bill_amount_matches_compute():
     from datetime import date
+
     from app.services.open_bill_service import compute_open_bill_amount, explain_open_bill_amount
 
     txs = [
-        {"description": "MERCADO", "amount": 100, "date": "2026-07-20T00:00:00Z",
-         "status": "PENDING", "creditCardMetadata": {"billForecastDate": "2026-08"}},
-        {"description": "PAGAMENTO FATURA", "amount": -50, "date": "2026-07-12T00:00:00Z",
-         "status": "PENDING", "creditCardMetadata": {"billForecastDate": "2026-08"}},
-        {"description": "CURSO 2/4", "amount": 40, "date": "2026-06-03T00:00:00Z",
-         "status": "POSTED", "creditCardMetadata": {"billId": "x", "billForecastDate": "2026-06",
-         "installmentNumber": 2, "totalInstallments": 4}},
+        {
+            "description": "MERCADO",
+            "amount": 100,
+            "date": "2026-07-20T00:00:00Z",
+            "status": "PENDING",
+            "creditCardMetadata": {"billForecastDate": "2026-08"},
+        },
+        {
+            "description": "PAGAMENTO FATURA",
+            "amount": -50,
+            "date": "2026-07-12T00:00:00Z",
+            "status": "PENDING",
+            "creditCardMetadata": {"billForecastDate": "2026-08"},
+        },
+        {
+            "description": "CURSO 2/4",
+            "amount": 40,
+            "date": "2026-06-03T00:00:00Z",
+            "status": "POSTED",
+            "creditCardMetadata": {
+                "billId": "x",
+                "billForecastDate": "2026-06",
+                "installmentNumber": 2,
+                "totalInstallments": 4,
+            },
+        },
     ]
     target, closed = date(2026, 8, 8), date(2026, 7, 8)
     explained = explain_open_bill_amount(txs, target, closed)
 
     assert explained["total"] == compute_open_bill_amount(txs, target, closed)
     assert explained["target_competencia"] == "2026-08"
-    motivos = {l["descricao"]: (l["contou"], l["motivo"]) for l in explained["linhas"]}
+    motivos = {
+        linha["descricao"]: (linha["contou"], linha["motivo"]) for linha in explained["linhas"]
+    }
     assert motivos["MERCADO"][0] is True
     assert "pagamento de fatura" in motivos["PAGAMENTO FATURA"][1]
-    assert any("projetada" in l["motivo"] for l in explained["linhas"] if l["contou"])
+    assert any("projetada" in linha["motivo"] for linha in explained["linhas"] if linha["contou"])
 
 
 @patch("app.api.endpoints.credit_card_bills.get_api_client")
 @patch("app.api.endpoints.credit_card_bills.pluggy_sdk")
 def test_debug_endpoint_flags_ghost_bill(mock_sdk, mock_client, client, db_session, user):
     from app.models.bank_account import BankAccount
+
     ctx = MagicMock()
     ctx.__enter__ = MagicMock(return_value=ctx)
     ctx.__exit__ = MagicMock(return_value=False)
@@ -481,14 +552,24 @@ def test_debug_endpoint_flags_ghost_bill(mock_sdk, mock_client, client, db_sessi
     # o item não devolve nenhuma conta de cartão
     mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[])
 
-    acc = BankAccount(user_id=user.id, name="Itaú+Luiza", bank_name="MeuPluggy",
-                      account_type="checking", external_id=str(uuid4()))
+    acc = BankAccount(
+        user_id=user.id,
+        name="Itaú+Luiza",
+        bank_name="MeuPluggy",
+        account_type="checking",
+        external_id=str(uuid4()),
+    )
     db_session.add(acc)
     db_session.flush()
     ghost = CreditCardBill(
-        user_id=user.id, bank_account_id=acc.id, pluggy_account_id="luiza-cancelado",
-        external_id="open:luiza", card_name="Luiza", due_date=date.today(),
-        total_amount=Decimal("120.00"), status=CreditCardBillStatus.OPEN,
+        user_id=user.id,
+        bank_account_id=acc.id,
+        pluggy_account_id="luiza-cancelado",
+        external_id="open:luiza",
+        card_name="Luiza",
+        due_date=date.today(),
+        total_amount=Decimal("120.00"),
+        status=CreditCardBillStatus.OPEN,
     )
     db_session.add(ghost)
     db_session.commit()
@@ -502,8 +583,11 @@ def test_debug_endpoint_flags_ghost_bill(mock_sdk, mock_client, client, db_sessi
 
 @patch("app.api.endpoints.credit_card_bills.get_api_client")
 @patch("app.api.endpoints.credit_card_bills.pluggy_sdk")
-def test_debug_endpoint_reports_bills_and_simulation(mock_sdk, mock_client, client, db_session, user):
+def test_debug_endpoint_reports_bills_and_simulation(
+    mock_sdk, mock_client, client, db_session, user
+):
     from app.models.bank_account import BankAccount
+
     ctx = MagicMock()
     ctx.__enter__ = MagicMock(return_value=ctx)
     ctx.__exit__ = MagicMock(return_value=False)
@@ -512,10 +596,12 @@ def test_debug_endpoint_reports_bills_and_simulation(mock_sdk, mock_client, clie
     pa = SimpleNamespace(id="card-x", type="CREDIT", name="Cartão X", status="ACTIVE")
     mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(results=[pa])
     # uma fatura já vencida e uma projeção futura
-    bills = {"results": [
-        {"id": "b1", "dueDate": "2026-08-10T00:00:00Z", "totalAmount": 300.0},
-        {"id": "b2", "dueDate": "2027-06-10T00:00:00Z", "totalAmount": 50.0},
-    ]}
+    bills = {
+        "results": [
+            {"id": "b1", "dueDate": "2026-08-10T00:00:00Z", "totalAmount": 300.0},
+            {"id": "b2", "dueDate": "2027-06-10T00:00:00Z", "totalAmount": 50.0},
+        ]
+    }
     mock_sdk.BillApi.return_value.bills_list_without_preload_content.return_value = SimpleNamespace(
         data=json.dumps(bills).encode()
     )
@@ -523,8 +609,13 @@ def test_debug_endpoint_reports_bills_and_simulation(mock_sdk, mock_client, clie
         SimpleNamespace(data=json.dumps({"results": [], "totalPages": 1}).encode())
     )
 
-    acc = BankAccount(user_id=user.id, name="Conexão", bank_name="MeuPluggy",
-                      account_type="checking", external_id=str(uuid4()))
+    acc = BankAccount(
+        user_id=user.id,
+        name="Conexão",
+        bank_name="MeuPluggy",
+        account_type="checking",
+        external_id=str(uuid4()),
+    )
     db_session.add(acc)
     db_session.commit()
 
@@ -533,6 +624,6 @@ def test_debug_endpoint_reports_bills_and_simulation(mock_sdk, mock_client, clie
     card = r.json()["cartoes"][0]
     assert card["conta_pluggy"]["status"] == "ACTIVE"
     assert len(card["faturas_pluggy"]) == 2
-    assert card["ultima_fatura_fechada"] == "2027-06-10"       # bug atual: pega a projeção
-    assert card["ultima_fatura_ja_vencida"] == "2026-08-10"    # correção
+    assert card["ultima_fatura_fechada"] == "2027-06-10"  # bug atual: pega a projeção
+    assert card["ultima_fatura_ja_vencida"] == "2026-08-10"  # correção
     assert card["simulado_com_ultima_vencida"]["ultima_fatura_fechada"] == "2026-08-10"

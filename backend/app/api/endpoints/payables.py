@@ -29,12 +29,14 @@ def upcoming_payables(
     today = date.today()
     until = today + timedelta(days=days)
     result = db.execute(
-        select(Payable).where(
+        select(Payable)
+        .where(
             Payable.user_id == user.id,
             Payable.status == PayableStatus.PENDING,
             Payable.due_date >= today,
             Payable.due_date <= until,
-        ).order_by(Payable.due_date.asc())
+        )
+        .order_by(Payable.due_date.asc())
     )
     return result.scalars().all()
 

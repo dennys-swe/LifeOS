@@ -51,11 +51,15 @@ def debug_open_bills(
 
     Marca também faturas OPEN cujo cartão sumiu do item da Pluggy (issue #25).
     """
-    accounts = db.execute(
-        select(BankAccount).where(
-            BankAccount.user_id == user.id, BankAccount.external_id.is_not(None)
+    accounts = (
+        db.execute(
+            select(BankAccount).where(
+                BankAccount.user_id == user.id, BankAccount.external_id.is_not(None)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     saldo = {
         b.pluggy_account_id: b
@@ -64,7 +68,9 @@ def debug_open_bills(
                 CreditCardBill.user_id == user.id,
                 CreditCardBill.status == CreditCardBillStatus.OPEN,
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     }
 
     out: list[dict] = []
@@ -77,8 +83,10 @@ def debug_open_bills(
 
         for account in accounts:
             try:
-                pluggy_accounts = account_api.accounts_list(item_id=account.external_id).results or []
-            except Exception as exc:  # noqa: BLE001
+                pluggy_accounts = (
+                    account_api.accounts_list(item_id=account.external_id).results or []
+                )
+            except Exception as exc:
                 out.append({"conexao": account.name, "erro": f"{type(exc).__name__}: {exc}"})
                 continue
 
@@ -89,10 +97,13 @@ def debug_open_bills(
                 card_name = getattr(pa, "marketing_name", None) or getattr(pa, "name", None)
 
                 try:
-                    raw_bills = json.loads(
-                        bill_api.bills_list_without_preload_content(account_id=pa.id).data
-                    ).get("results") or []
-                except Exception:  # noqa: BLE001
+                    raw_bills = (
+                        json.loads(
+                            bill_api.bills_list_without_preload_content(account_id=pa.id).data
+                        ).get("results")
+                        or []
+                    )
+                except Exception:
                     raw_bills = []
                 bills_by_due = sorted(
                     (b for b in raw_bills if b.get("dueDate")), key=lambda b: b["dueDate"]
@@ -111,12 +122,18 @@ def debug_open_bills(
                 )
                 last_closed_due = atual
 
-                stored_bills = db.execute(
-                    select(CreditCardBill).where(
-                        CreditCardBill.user_id == user.id,
-                        CreditCardBill.pluggy_account_id == pa.id,
-                    ).order_by(CreditCardBill.due_date)
-                ).scalars().all()
+                stored_bills = (
+                    db.execute(
+                        select(CreditCardBill)
+                        .where(
+                            CreditCardBill.user_id == user.id,
+                            CreditCardBill.pluggy_account_id == pa.id,
+                        )
+                        .order_by(CreditCardBill.due_date)
+                    )
+                    .scalars()
+                    .all()
+                )
 
                 entry: dict = {
                     "conexao": account.name,
@@ -145,7 +162,9 @@ def debug_open_bills(
                         }
                         for b in stored_bills
                     ],
-                    "ultima_fatura_fechada": last_closed_due.isoformat() if last_closed_due else None,
+                    "ultima_fatura_fechada": last_closed_due.isoformat()
+                    if last_closed_due
+                    else None,
                     "ultima_fatura_ja_vencida": corrigida.isoformat() if corrigida else None,
                 }
 
@@ -228,4 +247,3 @@ def update_credit_card_bill(
     if updated is None:
         raise HTTPException(status_code=404, detail="Fatura não encontrada.")
     return updated
-

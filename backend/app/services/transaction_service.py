@@ -74,9 +74,7 @@ def get_transactions(
 
 def get_transaction(db: Session, user_id: UUID, transaction_id: UUID) -> Optional[Transaction]:
     return db.execute(
-        select(Transaction).where(
-            Transaction.id == transaction_id, Transaction.user_id == user_id
-        )
+        select(Transaction).where(Transaction.id == transaction_id, Transaction.user_id == user_id)
     ).scalar_one_or_none()
 
 

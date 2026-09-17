@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
-from enum import Enum
 from decimal import Decimal
+from enum import Enum
 from typing import Optional
 from uuid import UUID
 

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from app.services import push_service
 from app.schemas.push_subscription import PushSubscriptionCreate
+from app.services import push_service
 
 
 def test_vapid_public_key_endpoint(client):
@@ -29,7 +29,9 @@ def test_subscribe_via_api(client):
 
 
 def test_save_subscription_reassigns_endpoint_to_new_user(db_session, user, other_user):
-    payload = PushSubscriptionCreate(endpoint="https://push.example.com/2", p256dh="key", auth="auth")
+    payload = PushSubscriptionCreate(
+        endpoint="https://push.example.com/2", p256dh="key", auth="auth"
+    )
     first = push_service.save_subscription(db_session, user.id, payload)
     assert first.user_id == user.id
 
@@ -40,6 +42,7 @@ def test_save_subscription_reassigns_endpoint_to_new_user(db_session, user, othe
 
 def test_send_upcoming_notifications_only_notifies_owner(db_session, user, other_user, monkeypatch):
     from datetime import date, timedelta
+
     from app.models.payable import Payable, PayableStatus
 
     # other_user não tem nada a vencer, então nenhum webpush é disparado — mas a

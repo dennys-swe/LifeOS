@@ -15,7 +15,6 @@ from app.models.transaction import Transaction, TransactionType
 from app.schemas.summary import CategorySummary, HistoryResponse, MonthSummary, SummaryResponse
 from app.services.budget_service import build_budget_map
 
-
 _UNCATEGORIZED_NAME = "Sem categoria"
 _UNCATEGORIZED_COLOR = "#64748B"
 
@@ -54,21 +53,29 @@ def get_summary(db: Session, user_id: UUID, month: int, year: int) -> SummaryRes
     start_date = date(year, month, 1)
     end_date = date(year, month, monthrange(year, month)[1])
 
-    payables = db.execute(
-        select(Payable).where(
-            Payable.user_id == user_id,
-            Payable.due_date >= start_date,
-            Payable.due_date <= end_date,
+    payables = (
+        db.execute(
+            select(Payable).where(
+                Payable.user_id == user_id,
+                Payable.due_date >= start_date,
+                Payable.due_date <= end_date,
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
-    transactions = db.execute(
-        select(Transaction).where(
-            Transaction.user_id == user_id,
-            Transaction.date >= start_date,
-            Transaction.date <= end_date,
+    transactions = (
+        db.execute(
+            select(Transaction).where(
+                Transaction.user_id == user_id,
+                Transaction.date >= start_date,
+                Transaction.date <= end_date,
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     categories = {
         cat.id: cat
@@ -83,7 +90,9 @@ def get_summary(db: Session, user_id: UUID, month: int, year: int) -> SummaryRes
     payables_by_category: dict = {}
     for p in payables:
         key = p.category_id
-        payables_by_category[key] = payables_by_category.get(key, Decimal("0")) + Decimal(str(p.amount))
+        payables_by_category[key] = payables_by_category.get(key, Decimal("0")) + Decimal(
+            str(p.amount)
+        )
         # OVERDUE é dívida em aberto igual a PENDING — tratá-lo como um terceiro
         # caso fazia a conta vencida desaparecer de todos os totais.
         if p.status in (PayableStatus.PENDING, PayableStatus.OVERDUE):
@@ -103,11 +112,7 @@ def get_summary(db: Session, user_id: UUID, month: int, year: int) -> SummaryRes
     budget_map = build_budget_map(db, user_id=user_id, month=month, year=year)
     # Orçamento definido e ainda não consumido precisa aparecer — é justamente o
     # caso em que o usuário quer ver "R$ 0 de R$ 400".
-    all_keys = (
-        set(payables_by_category)
-        | set(spend_by_category)
-        | set(budget_map)
-    )
+    all_keys = set(payables_by_category) | set(spend_by_category) | set(budget_map)
 
     by_category = []
     for key in all_keys:
@@ -127,16 +132,18 @@ def get_summary(db: Session, user_id: UUID, month: int, year: int) -> SummaryRes
             # Mercado" só faz sentido contra o que de fato saiu da conta.
             budget_used_pct = round(float(spent / budget_limit * 100), 1)
 
-        by_category.append(CategorySummary(
-            category_id=key,
-            category_name=name,
-            color_hex=color,
-            total_expenses=spent,
-            transaction_count=count_by_category.get(key, 0),
-            total_payables=payables_by_category.get(key, Decimal("0")),
-            budget_limit=budget_limit,
-            budget_used_pct=budget_used_pct,
-        ))
+        by_category.append(
+            CategorySummary(
+                category_id=key,
+                category_name=name,
+                color_hex=color,
+                total_expenses=spent,
+                transaction_count=count_by_category.get(key, 0),
+                total_payables=payables_by_category.get(key, Decimal("0")),
+                budget_limit=budget_limit,
+                budget_used_pct=budget_used_pct,
+            )
+        )
 
     # Ordena pelo gasto: com a ordenação antiga (por payables) toda categoria que
     # só tem transação — a maioria, vinda do banco — afundava no fim da lista.
@@ -176,21 +183,29 @@ def get_history(
     ultimo_m, ultimo_y = periodos[-1]
     fim = date(ultimo_y, ultimo_m, monthrange(ultimo_y, ultimo_m)[1])
 
-    transactions = db.execute(
-        select(Transaction).where(
-            Transaction.user_id == user_id,
-            Transaction.date >= inicio,
-            Transaction.date <= fim,
+    transactions = (
+        db.execute(
+            select(Transaction).where(
+                Transaction.user_id == user_id,
+                Transaction.date >= inicio,
+                Transaction.date <= fim,
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
-    payables = db.execute(
-        select(Payable).where(
-            Payable.user_id == user_id,
-            Payable.due_date >= inicio,
-            Payable.due_date <= fim,
+    payables = (
+        db.execute(
+            select(Payable).where(
+                Payable.user_id == user_id,
+                Payable.due_date >= inicio,
+                Payable.due_date <= fim,
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     income: dict = {}
     expenses: dict = {}
@@ -215,13 +230,15 @@ def get_history(
         chave = (m, y)
         mes_income = income.get(chave, Decimal("0"))
         mes_expenses = expenses.get(chave, Decimal("0"))
-        result.append(MonthSummary(
-            month=m,
-            year=y,
-            total_income=mes_income,
-            total_expenses=mes_expenses,
-            total_pending=pending.get(chave, Decimal("0")),
-            total_paid=paid.get(chave, Decimal("0")),
-            balance=mes_income - mes_expenses,
-        ))
+        result.append(
+            MonthSummary(
+                month=m,
+                year=y,
+                total_income=mes_income,
+                total_expenses=mes_expenses,
+                total_pending=pending.get(chave, Decimal("0")),
+                total_paid=paid.get(chave, Decimal("0")),
+                balance=mes_income - mes_expenses,
+            )
+        )
     return HistoryResponse(months=result)

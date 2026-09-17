@@ -6,7 +6,6 @@ from app.services.category_rule_service import (
     apply_rule_to_existing,
     build_keyword_map,
     create_rule,
-    list_rules,
 )
 
 
@@ -20,14 +19,18 @@ def _make_category(db_session, user, name="Mercado", color="#00FF00"):
 
 def test_create_rule_normalizes_keyword(db_session, user):
     cat = _make_category(db_session, user)
-    rule = create_rule(db_session, user.id, CategoryRuleCreate(keyword="supermercado", category_id=cat.id))
+    rule = create_rule(
+        db_session, user.id, CategoryRuleCreate(keyword="supermercado", category_id=cat.id)
+    )
     assert rule.keyword == "SUPERMERCADO"
     assert rule.user_id == user.id
 
 
 def test_create_rule_strips_whitespace(db_session, user):
     cat = _make_category(db_session, user)
-    rule = create_rule(db_session, user.id, CategoryRuleCreate(keyword="  padaria  ", category_id=cat.id))
+    rule = create_rule(
+        db_session, user.id, CategoryRuleCreate(keyword="  padaria  ", category_id=cat.id)
+    )
     assert rule.keyword == "PADARIA"
 
 
@@ -42,8 +45,14 @@ def test_build_keyword_map_correct_dict(db_session, user):
 def test_build_keyword_map_respects_priority(db_session, user):
     cat_low = _make_category(db_session, user, "Low", "#111111")
     cat_high = _make_category(db_session, user, "High", "#222222")
-    create_rule(db_session, user.id, CategoryRuleCreate(keyword="comum", category_id=cat_low.id, priority=0))
-    create_rule(db_session, user.id, CategoryRuleCreate(keyword="comum", category_id=cat_high.id, priority=10))
+    create_rule(
+        db_session, user.id, CategoryRuleCreate(keyword="comum", category_id=cat_low.id, priority=0)
+    )
+    create_rule(
+        db_session,
+        user.id,
+        CategoryRuleCreate(keyword="comum", category_id=cat_high.id, priority=10),
+    )
     kmap = build_keyword_map(db_session, user.id)
     # Higher priority wins — dict insertion order preserves ORDER BY priority DESC
     assert kmap["COMUM"] == str(cat_high.id)
@@ -51,18 +60,23 @@ def test_build_keyword_map_respects_priority(db_session, user):
 
 def test_build_keyword_map_excludes_other_users(db_session, user, other_user):
     cat = _make_category(db_session, other_user, "Alimentação")
-    create_rule(db_session, other_user.id, CategoryRuleCreate(keyword="restaurante", category_id=cat.id))
+    create_rule(
+        db_session, other_user.id, CategoryRuleCreate(keyword="restaurante", category_id=cat.id)
+    )
     kmap = build_keyword_map(db_session, user.id)
     assert kmap == {}
 
 
 def test_create_rule_via_api(client, db_session, user):
     cat = _make_category(db_session, user, "Transporte")
-    response = client.post("/category-rules", json={
-        "keyword": "uber",
-        "category_id": str(cat.id),
-        "priority": 0,
-    })
+    response = client.post(
+        "/category-rules",
+        json={
+            "keyword": "uber",
+            "category_id": str(cat.id),
+            "priority": 0,
+        },
+    )
     assert response.status_code == 201
     data = response.json()
     assert data["keyword"] == "UBER"
@@ -82,7 +96,9 @@ def test_list_rules(client, db_session, user):
 
 def test_delete_rule(client, db_session, user):
     cat = _make_category(db_session, user)
-    create_resp = client.post("/category-rules", json={"keyword": "farmacia", "category_id": str(cat.id)})
+    create_resp = client.post(
+        "/category-rules", json={"keyword": "farmacia", "category_id": str(cat.id)}
+    )
     rule_id = create_resp.json()["id"]
     del_resp = client.delete(f"/category-rules/{rule_id}")
     assert del_resp.status_code == 204
@@ -162,7 +178,8 @@ def test_rule_matches_regardless_of_case(db_session, user):
     minuscula = _tx(db_session, user, "Conveniencia Posto Cas")
 
     rule = create_rule(
-        db_session, user.id,
+        db_session,
+        user.id,
         CategoryRuleCreate(keyword="conveniencia", category_id=mercado.id, priority=0),
     )
     applied = apply_rule_to_existing(db_session, user.id, rule)
@@ -178,7 +195,8 @@ def test_rule_also_fills_uncategorized(db_session, user):
     sem_categoria = _tx(db_session, user, "CONVENIENCIA POSTO")
 
     rule = create_rule(
-        db_session, user.id,
+        db_session,
+        user.id,
         CategoryRuleCreate(keyword="CONVENIENCIA", category_id=mercado.id, priority=0),
     )
 
@@ -197,7 +215,8 @@ def test_income_rule_does_not_touch_expenses(db_session, user):
     pago = _tx(db_session, user, "UBER DO BRASIL corrida", tx_type=TransactionType.EXPENSE)
 
     rule = create_rule(
-        db_session, user.id,
+        db_session,
+        user.id,
         CategoryRuleCreate(keyword="UBER DO BRASIL", category_id=renda.id, priority=10),
     )
 
@@ -213,7 +232,8 @@ def test_rule_does_not_touch_other_users_transactions(db_session, user, other_us
     alheia = _tx(db_session, other_user, "CONVENIENCIA POSTO CAS")
 
     rule = create_rule(
-        db_session, user.id,
+        db_session,
+        user.id,
         CategoryRuleCreate(keyword="CONVENIENCIA", category_id=mercado.id, priority=0),
     )
 

@@ -6,6 +6,7 @@ contas, o card poderia contradizer o número exibido ao lado dele.
 As regras são funções puras sobre dados já carregados (`_rule_*`), então dá para
 testá-las sem banco. `build_insights` só carrega os dados e as orquestra.
 """
+
 from __future__ import annotations
 
 from calendar import monthrange
@@ -60,6 +61,7 @@ def _prev_month(month: int, year: int) -> tuple[int, int]:
 # Regras (puras)
 # ---------------------------------------------------------------------------
 
+
 def _rule_category_changes(
     current: Dict[Optional[UUID], Decimal],
     previous: Dict[Optional[UUID], Decimal],
@@ -76,14 +78,16 @@ def _rule_category_changes(
             # Categoria que não existia no mês anterior: só vale avisar se o
             # valor for relevante por si só (não há percentual pra comparar).
             if atual >= MIN_DELTA_AMOUNT:
-                insights.append(Insight(
-                    kind="category_new",
-                    severity="neutral",
-                    title=f"Novo gasto em {nome}",
-                    detail=f"{_brl(atual)} neste mês, e nada no mês anterior.",
-                    category_id=key,
-                    amount=atual,
-                ))
+                insights.append(
+                    Insight(
+                        kind="category_new",
+                        severity="neutral",
+                        title=f"Novo gasto em {nome}",
+                        detail=f"{_brl(atual)} neste mês, e nada no mês anterior.",
+                        category_id=key,
+                        amount=atual,
+                    )
+                )
             continue
 
         pct = _pct_change(atual, anterior)
@@ -91,25 +95,29 @@ def _rule_category_changes(
             continue
 
         if delta < 0:
-            insights.append(Insight(
-                kind="category_down",
-                severity="good",
-                title=f"{_brl(delta)} menos em {nome}",
-                detail=f"{_brl(atual)} neste mês contra {_brl(anterior)} no anterior.",
-                category_id=key,
-                amount=abs(delta),
-                delta_pct=pct,
-            ))
+            insights.append(
+                Insight(
+                    kind="category_down",
+                    severity="good",
+                    title=f"{_brl(delta)} menos em {nome}",
+                    detail=f"{_brl(atual)} neste mês contra {_brl(anterior)} no anterior.",
+                    category_id=key,
+                    amount=abs(delta),
+                    delta_pct=pct,
+                )
+            )
         else:
-            insights.append(Insight(
-                kind="category_up",
-                severity="warning",
-                title=f"{_brl(delta)} mais em {nome}",
-                detail=f"{_brl(atual)} neste mês contra {_brl(anterior)} no anterior.",
-                category_id=key,
-                amount=delta,
-                delta_pct=pct,
-            ))
+            insights.append(
+                Insight(
+                    kind="category_up",
+                    severity="warning",
+                    title=f"{_brl(delta)} mais em {nome}",
+                    detail=f"{_brl(atual)} neste mês contra {_brl(anterior)} no anterior.",
+                    category_id=key,
+                    amount=delta,
+                    delta_pct=pct,
+                )
+            )
 
     return insights
 
@@ -212,25 +220,29 @@ def _rule_budgets(
         nome = names.get(category_id, _UNCATEGORIZED)
 
         if pct >= 100:
-            insights.append(Insight(
-                kind="budget_exceeded",
-                severity="warning",
-                title=f"Limite de {nome} estourado",
-                detail=f"{_brl(gasto)} de {_brl(limite)} ({pct:.0f}%).",
-                category_id=category_id,
-                amount=gasto - limite,
-                delta_pct=pct,
-            ))
+            insights.append(
+                Insight(
+                    kind="budget_exceeded",
+                    severity="warning",
+                    title=f"Limite de {nome} estourado",
+                    detail=f"{_brl(gasto)} de {_brl(limite)} ({pct:.0f}%).",
+                    category_id=category_id,
+                    amount=gasto - limite,
+                    delta_pct=pct,
+                )
+            )
         elif pct >= BUDGET_NEAR_PCT:
-            insights.append(Insight(
-                kind="budget_near",
-                severity="warning",
-                title=f"{pct:.0f}% do limite de {nome}",
-                detail=f"{_brl(gasto)} de {_brl(limite)}. Restam {_brl(limite - gasto)}.",
-                category_id=category_id,
-                amount=limite - gasto,
-                delta_pct=pct,
-            ))
+            insights.append(
+                Insight(
+                    kind="budget_near",
+                    severity="warning",
+                    title=f"{pct:.0f}% do limite de {nome}",
+                    detail=f"{_brl(gasto)} de {_brl(limite)}. Restam {_brl(limite - gasto)}.",
+                    category_id=category_id,
+                    amount=limite - gasto,
+                    delta_pct=pct,
+                )
+            )
     return insights
 
 
@@ -247,6 +259,7 @@ def rank_insights(insights: List[Insight]) -> List[Insight]:
 # ---------------------------------------------------------------------------
 # Orquestração
 # ---------------------------------------------------------------------------
+
 
 def build_insights(
     db: Session, user_id: UUID, month: int, year: int, today: Optional[date] = None
@@ -280,9 +293,7 @@ def build_insights(
     return rank_insights(insights)
 
 
-def _transactions_of_month(
-    db: Session, user_id: UUID, month: int, year: int
-) -> List[Transaction]:
+def _transactions_of_month(db: Session, user_id: UUID, month: int, year: int) -> List[Transaction]:
     start = date(year, month, 1)
     end = date(year, month, monthrange(year, month)[1])
     return list(
@@ -292,5 +303,7 @@ def _transactions_of_month(
                 Transaction.date >= start,
                 Transaction.date <= end,
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )

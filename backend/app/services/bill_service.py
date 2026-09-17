@@ -96,20 +96,28 @@ def upsert_bill(
 
     # Herda as personalizações do cartão (apelido e cor) se já existirem para
     # este pluggy_account_id — são do cartão, não da fatura individual.
-    existing_custom = db.execute(
-        select(CreditCardBill.custom_card_name).where(
-            CreditCardBill.user_id == user_id,
-            CreditCardBill.pluggy_account_id == pluggy_account_id,
-            CreditCardBill.custom_card_name.isnot(None),
+    existing_custom = (
+        db.execute(
+            select(CreditCardBill.custom_card_name).where(
+                CreditCardBill.user_id == user_id,
+                CreditCardBill.pluggy_account_id == pluggy_account_id,
+                CreditCardBill.custom_card_name.isnot(None),
+            )
         )
-    ).scalars().first()
-    existing_color = db.execute(
-        select(CreditCardBill.custom_color_hex).where(
-            CreditCardBill.user_id == user_id,
-            CreditCardBill.pluggy_account_id == pluggy_account_id,
-            CreditCardBill.custom_color_hex.isnot(None),
+        .scalars()
+        .first()
+    )
+    existing_color = (
+        db.execute(
+            select(CreditCardBill.custom_color_hex).where(
+                CreditCardBill.user_id == user_id,
+                CreditCardBill.pluggy_account_id == pluggy_account_id,
+                CreditCardBill.custom_color_hex.isnot(None),
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     if bill is None:
         bill = CreditCardBill(
@@ -174,15 +182,19 @@ def upsert_open_bill(
     """
     today = today or date.today()
 
-    closed = db.execute(
-        select(CreditCardBill)
-        .where(
-            CreditCardBill.user_id == user_id,
-            CreditCardBill.pluggy_account_id == pluggy_account_id,
-            CreditCardBill.status == CreditCardBillStatus.CLOSED,
+    closed = (
+        db.execute(
+            select(CreditCardBill)
+            .where(
+                CreditCardBill.user_id == user_id,
+                CreditCardBill.pluggy_account_id == pluggy_account_id,
+                CreditCardBill.status == CreditCardBillStatus.CLOSED,
+            )
+            .order_by(CreditCardBill.due_date.desc())
         )
-        .order_by(CreditCardBill.due_date.desc())
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     if closed is None:
         return None
@@ -198,9 +210,7 @@ def upsert_open_bill(
     if not is_in_payable_window(target_due, today):
         return None
 
-    amount = open_bill_service.compute_open_bill_amount(
-        transactions, target_due, closed.due_date
-    )
+    amount = open_bill_service.compute_open_bill_amount(transactions, target_due, closed.due_date)
 
     bill = db.execute(
         select(CreditCardBill).where(
@@ -272,12 +282,16 @@ def update_bill_customization(
         raw = changes["custom_card_name"]
         changes["custom_card_name"] = raw.strip() if raw and raw.strip() else None
 
-    all_bills = db.execute(
-        select(CreditCardBill).where(
-            CreditCardBill.user_id == user_id,
-            CreditCardBill.pluggy_account_id == bill.pluggy_account_id,
+    all_bills = (
+        db.execute(
+            select(CreditCardBill).where(
+                CreditCardBill.user_id == user_id,
+                CreditCardBill.pluggy_account_id == bill.pluggy_account_id,
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     for b in all_bills:
         for field, value in changes.items():
@@ -332,4 +346,3 @@ def _sync_payable(
         payable.amount = bill.total_amount
         payable.due_date = bill.due_date
     db.add(payable)
-

@@ -9,11 +9,11 @@ from app.api.endpoints.budgets import router as budgets_router
 from app.api.endpoints.categories import router as categories_router
 from app.api.endpoints.category_rules import router as category_rules_router
 from app.api.endpoints.credit_card_bills import router as credit_card_bills_router
+from app.api.endpoints.insights import router as insights_router
 from app.api.endpoints.jobs import router as jobs_router
 from app.api.endpoints.payables import router as payables_router
 from app.api.endpoints.push_subscriptions import router as push_subscriptions_router
 from app.api.endpoints.recurring_payables import router as recurring_payables_router
-from app.api.endpoints.insights import router as insights_router
 from app.api.endpoints.summary import router as summary_router
 from app.api.endpoints.transactions import router as transactions_router
 from app.api.endpoints.webhooks import router as webhooks_router
@@ -55,9 +55,7 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-app.include_router(
-    fastapi_users.get_auth_router(auth_backend), prefix="/auth/jwt", tags=["Auth"]
-)
+app.include_router(fastapi_users.get_auth_router(auth_backend), prefix="/auth/jwt", tags=["Auth"])
 app.include_router(
     fastapi_users.get_register_router(UserRead, UserCreate), prefix="/auth", tags=["Auth"]
 )
@@ -87,7 +85,7 @@ def root():
     try:
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
-    except Exception:  # noqa: BLE001
+    except Exception as exc:
         logging.getLogger(__name__).exception("readiness check falhou: banco indisponível")
-        raise HTTPException(status_code=503, detail="database unavailable")
+        raise HTTPException(status_code=503, detail="database unavailable") from exc
     return {"status": "ok"}

@@ -1,5 +1,6 @@
 """Regras de insight. As `_rule_*` são puras, então a maior parte dos casos
 (limiar, sinal, texto) é testada sem banco."""
+
 from __future__ import annotations
 
 import uuid
@@ -9,6 +10,7 @@ from decimal import Decimal
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.transaction import Transaction, TransactionType
+from app.schemas.insight import Insight
 from app.services.insight_service import (
     _brl,
     _prev_month,
@@ -19,7 +21,6 @@ from app.services.insight_service import (
     build_insights,
     rank_insights,
 )
-from app.schemas.insight import Insight
 
 CAT_A = uuid.uuid4()
 CAT_B = uuid.uuid4()
@@ -43,6 +44,7 @@ def _tx(amount, *, dia=10, tipo=TransactionType.EXPENSE, transfer=False, cat=CAT
 # Formatação
 # ---------------------------------------------------------------------------
 
+
 def test_brl_formats_thousands_ptbr():
     assert _brl(Decimal("1234.56")) == "R$ 1.234,56"
     assert _brl(Decimal("1234567.80")) == "R$ 1.234.567,80"
@@ -63,10 +65,9 @@ def test_prev_month_crosses_year():
 # Variação por categoria
 # ---------------------------------------------------------------------------
 
+
 def test_spending_less_is_a_good_insight():
-    insights = _rule_category_changes(
-        {CAT_A: Decimal("300")}, {CAT_A: Decimal("500")}, NAMES
-    )
+    insights = _rule_category_changes({CAT_A: Decimal("300")}, {CAT_A: Decimal("500")}, NAMES)
 
     assert len(insights) == 1
     assert insights[0].kind == "category_down"
@@ -76,9 +77,7 @@ def test_spending_less_is_a_good_insight():
 
 
 def test_spending_more_is_a_warning():
-    insights = _rule_category_changes(
-        {CAT_A: Decimal("500")}, {CAT_A: Decimal("300")}, NAMES
-    )
+    insights = _rule_category_changes({CAT_A: Decimal("500")}, {CAT_A: Decimal("300")}, NAMES)
 
     assert insights[0].kind == "category_up"
     assert insights[0].severity == "warning"
@@ -87,18 +86,14 @@ def test_spending_more_is_a_warning():
 
 def test_small_absolute_delta_is_ignored():
     """Variação percentual alta mas irrelevante em dinheiro não vira card."""
-    insights = _rule_category_changes(
-        {CAT_A: Decimal("40")}, {CAT_A: Decimal("10")}, NAMES
-    )
+    insights = _rule_category_changes({CAT_A: Decimal("40")}, {CAT_A: Decimal("10")}, NAMES)
 
     assert insights == []
 
 
 def test_small_percentage_delta_is_ignored():
     """E o inverso: R$ 60 sobre R$ 5000 é ruído."""
-    insights = _rule_category_changes(
-        {CAT_A: Decimal("5060")}, {CAT_A: Decimal("5000")}, NAMES
-    )
+    insights = _rule_category_changes({CAT_A: Decimal("5060")}, {CAT_A: Decimal("5000")}, NAMES)
 
     assert insights == []
 
@@ -117,9 +112,7 @@ def test_new_category_below_threshold_is_ignored():
 
 
 def test_uncategorized_uses_fallback_name():
-    insights = _rule_category_changes(
-        {None: Decimal("300")}, {None: Decimal("500")}, NAMES
-    )
+    insights = _rule_category_changes({None: Decimal("300")}, {None: Decimal("500")}, NAMES)
 
     assert "Sem categoria" in insights[0].title
 
@@ -127,6 +120,7 @@ def test_uncategorized_uses_fallback_name():
 # ---------------------------------------------------------------------------
 # Maior gasto
 # ---------------------------------------------------------------------------
+
 
 def test_biggest_expense_ignores_income_and_transfer():
     txs = [
@@ -150,6 +144,7 @@ def test_biggest_expense_none_when_no_spending():
 # ---------------------------------------------------------------------------
 # Ritmo
 # ---------------------------------------------------------------------------
+
 
 def test_pace_only_applies_to_current_month():
     """Em mês fechado a comparação de totais já é dada pelas regras de categoria."""
@@ -183,6 +178,7 @@ def test_pace_below_last_month_is_good():
 # Orçamento
 # ---------------------------------------------------------------------------
 
+
 def test_budget_exceeded():
     insights = _rule_budgets({CAT_A: Decimal("450")}, {CAT_A: Decimal("400")}, NAMES)
 
@@ -205,9 +201,14 @@ def test_budget_comfortable_is_silent():
 # Ranking
 # ---------------------------------------------------------------------------
 
+
 def test_warnings_come_before_good_news():
-    boas = Insight(kind="category_down", severity="good", title="a", detail="", amount=Decimal("900"))
-    alerta = Insight(kind="category_up", severity="warning", title="b", detail="", amount=Decimal("60"))
+    boas = Insight(
+        kind="category_down", severity="good", title="a", detail="", amount=Decimal("900")
+    )
+    alerta = Insight(
+        kind="category_up", severity="warning", title="b", detail="", amount=Decimal("60")
+    )
 
     assert [i.severity for i in rank_insights([boas, alerta])] == ["warning", "good"]
 
@@ -222,8 +223,12 @@ def test_ranking_caps_the_list():
 
 
 def test_bigger_amount_first_within_same_severity():
-    pequeno = Insight(kind="category_up", severity="warning", title="p", detail="", amount=Decimal("60"))
-    grande = Insight(kind="category_up", severity="warning", title="g", detail="", amount=Decimal("900"))
+    pequeno = Insight(
+        kind="category_up", severity="warning", title="p", detail="", amount=Decimal("60")
+    )
+    grande = Insight(
+        kind="category_up", severity="warning", title="g", detail="", amount=Decimal("900")
+    )
 
     assert [i.title for i in rank_insights([pequeno, grande])] == ["g", "p"]
 
@@ -232,29 +237,32 @@ def test_bigger_amount_first_within_same_severity():
 # Integração
 # ---------------------------------------------------------------------------
 
+
 def test_build_insights_end_to_end(db_session, user):
     mercado = Category(user_id=user.id, name="Mercado", color_hex="#84CC16")
     db_session.add(mercado)
     db_session.commit()
 
     def add(amount, month, dia=10, transfer=False):
-        db_session.add(Transaction(
-            id=uuid.uuid4(),
-            user_id=user.id,
-            date=date(2026, month, dia),
-            description="Compra",
-            amount=Decimal(str(amount)),
-            type=TransactionType.EXPENSE,
-            category_id=mercado.id,
-            is_transfer=transfer,
-        ))
+        db_session.add(
+            Transaction(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                date=date(2026, month, dia),
+                description="Compra",
+                amount=Decimal(str(amount)),
+                type=TransactionType.EXPENSE,
+                category_id=mercado.id,
+                is_transfer=transfer,
+            )
+        )
 
     add(500, 6)
     add(200, 7)
     add(9999, 7, transfer=True)  # transferência não pode influenciar
-    db_session.add(Budget(
-        user_id=user.id, category_id=mercado.id, month=7, year=2026, limit_amount=100
-    ))
+    db_session.add(
+        Budget(user_id=user.id, category_id=mercado.id, month=7, year=2026, limit_amount=100)
+    )
     db_session.commit()
 
     insights = build_insights(db_session, user.id, month=7, year=2026, today=date(2026, 8, 1))
@@ -276,15 +284,17 @@ def test_insights_endpoint_isolates_users(client, db_session, user, other_user):
     cat = Category(user_id=other_user.id, name="Dele", color_hex="#000000")
     db_session.add(cat)
     db_session.commit()
-    db_session.add(Transaction(
-        id=uuid.uuid4(),
-        user_id=other_user.id,
-        date=date(2026, 7, 10),
-        description="Gasto de outro",
-        amount=Decimal("5000"),
-        type=TransactionType.EXPENSE,
-        category_id=cat.id,
-    ))
+    db_session.add(
+        Transaction(
+            id=uuid.uuid4(),
+            user_id=other_user.id,
+            date=date(2026, 7, 10),
+            description="Gasto de outro",
+            amount=Decimal("5000"),
+            type=TransactionType.EXPENSE,
+            category_id=cat.id,
+        )
+    )
     db_session.commit()
 
     assert client.get("/insights?month=7&year=2026").json() == {"insights": []}

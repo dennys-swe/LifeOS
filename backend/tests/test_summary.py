@@ -1,6 +1,6 @@
 import uuid
-from decimal import Decimal
 from datetime import date, timedelta
+from decimal import Decimal
 
 from app.models.budget import Budget
 from app.models.category import Category
@@ -8,7 +8,9 @@ from app.models.payable import Payable, PayableStatus
 from app.models.transaction import Transaction, TransactionType
 
 
-def _make_payable(db_session, user, amount, status=PayableStatus.PENDING, month=5, year=2026, category_id=None):
+def _make_payable(
+    db_session, user, amount, status=PayableStatus.PENDING, month=5, year=2026, category_id=None
+):
     p = Payable(
         id=uuid.uuid4(),
         user_id=user.id,
@@ -130,7 +132,7 @@ def test_budget_used_pct_reacts_to_real_spending(db_session, user, client):
 
 
 def test_budget_with_no_movement_still_appears(db_session, user, client):
-    """"R$ 0 de R$ 400" é justamente o que o usuário quer ver — a categoria não
+    """ "R$ 0 de R$ 400" é justamente o que o usuário quer ver — a categoria não
     pode desaparecer só porque ainda não houve gasto."""
     cat = Category(user_id=user.id, name="Reservado", color_hex="#A855F7")
     db_session.add(cat)
@@ -348,7 +350,9 @@ def test_history_default_months(client):
 
 def test_history_totals_match_summary(client, db_session, user):
     from datetime import date
+
     from app.models.transaction import Transaction, TransactionType
+
     t = Transaction(
         id=uuid.uuid4(),
         user_id=user.id,

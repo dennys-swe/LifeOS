@@ -11,7 +11,15 @@ from app.services.recurring_service import (
 )
 
 
-def _make_recurring(db_session, user, title="Internet", amount=99.90, day_of_month=10, active=True, start_date=date(2025, 1, 1)):
+def _make_recurring(
+    db_session,
+    user,
+    title="Internet",
+    amount=99.90,
+    day_of_month=10,
+    active=True,
+    start_date=date(2025, 1, 1),
+):
     payload = RecurringPayableCreate(
         title=title, amount=amount, day_of_month=day_of_month, active=active, start_date=start_date
     )
@@ -99,6 +107,7 @@ def test_delete_recurring_preserves_payables(db_session, user):
 
     db_session.expire_all()
     from app.models.payable import Payable
+
     remaining = db_session.get(Payable, payable_id)
     assert remaining is not None
     assert remaining.recurring_payable_id is None
@@ -106,17 +115,21 @@ def test_delete_recurring_preserves_payables(db_session, user):
 
 def test_get_recurring_not_found(db_session, user):
     import uuid
+
     result = get_recurring(db_session, user.id, uuid.uuid4())
     assert result is None
 
 
 def test_create_recurring_via_api(client):
-    response = client.post("/recurring-payables", json={
-        "title": "Netflix",
-        "amount": 45.90,
-        "day_of_month": 5,
-        "active": True,
-    })
+    response = client.post(
+        "/recurring-payables",
+        json={
+            "title": "Netflix",
+            "amount": 45.90,
+            "day_of_month": 5,
+            "active": True,
+        },
+    )
     assert response.status_code == 201
     data = response.json()
     assert data["id"]
@@ -124,13 +137,16 @@ def test_create_recurring_via_api(client):
 
 
 def test_generate_via_api(client):
-    client.post("/recurring-payables", json={
-        "title": "Academia",
-        "amount": 80.00,
-        "day_of_month": 1,
-        "active": True,
-        "start_date": "2026-01-01",
-    })
+    client.post(
+        "/recurring-payables",
+        json={
+            "title": "Academia",
+            "amount": 80.00,
+            "day_of_month": 1,
+            "active": True,
+            "start_date": "2026-01-01",
+        },
+    )
     response = client.post("/recurring-payables/generate?month=6&year=2026")
     assert response.status_code == 201
     assert len(response.json()) == 1
