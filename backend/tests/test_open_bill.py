@@ -359,6 +359,32 @@ def test_no_open_bill_when_bank_already_projects_far_ahead(db_session, user):
     )
 
 
+def test_open_bill_ignores_far_future_projected_bill_when_picking_last_closed(db_session, user):
+    """Issue #84: o Inter publica faturas projetadas com quase um ano de
+    antecedência, todas marcadas CLOSED pela Bills API. Escolher a de
+    vencimento mais distante como "última fechada" jogava o ciclo-alvo pra
+    2027, sem nenhuma transação — fatura aberta zerada. A última fechada de
+    verdade é a última já vencida, mesmo com uma projeção futura no meio.
+    """
+    account = _make_account(db_session, user)
+    _closed_bill(db_session, user, account, "2026-07-08")  # última real, já vencida
+    _closed_bill(db_session, user, account, "2027-06-12")  # projeção futura do Inter
+
+    bill = bill_service.upsert_open_bill(
+        db_session,
+        user.id,
+        account,
+        "pluggy-acc-1",
+        [_tx(150, "2026-07-20", forecast="2026-08")],
+        card_name="Cartão X",
+        today=date(2026, 8, 4),
+    )
+
+    assert bill is not None
+    assert bill.due_date == date(2026, 8, 8)
+    assert bill.total_amount == Decimal("150.00")
+
+
 def test_charge_with_pagamento_in_the_middle_is_not_excluded():
     """ "JUROS PAGAMENTO CONTAS" é encargo, não quitação de fatura."""
     txs = [_tx(0.22, "2026-08-20", forecast="2026-09", description="JUROS PAGAMENTO CONTAS")]

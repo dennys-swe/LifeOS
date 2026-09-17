@@ -182,6 +182,12 @@ def upsert_open_bill(
     """
     today = today or date.today()
 
+    # A última FECHADA de verdade é a última já VENCIDA, não a de vencimento
+    # mais distante: o Inter publica faturas projetadas com quase um ano de
+    # antecedência (todas CLOSED, porque a Bills API já as conhece), e pegar
+    # a mais distante fazia o ciclo-alvo cair anos à frente — sem nenhuma
+    # transação que caísse nele, reconstruindo a fatura aberta como R$ 0,00
+    # (issue #84).
     closed = (
         db.execute(
             select(CreditCardBill)
@@ -189,6 +195,7 @@ def upsert_open_bill(
                 CreditCardBill.user_id == user_id,
                 CreditCardBill.pluggy_account_id == pluggy_account_id,
                 CreditCardBill.status == CreditCardBillStatus.CLOSED,
+                CreditCardBill.due_date <= today,
             )
             .order_by(CreditCardBill.due_date.desc())
         )
