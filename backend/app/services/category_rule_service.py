@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List, Optional
 from uuid import UUID
 
@@ -18,6 +19,7 @@ def create_rule(db: Session, user_id: UUID, payload: CategoryRuleCreate) -> Cate
         keyword=payload.keyword.strip().upper(),
         category_id=payload.category_id,
         priority=payload.priority,
+        is_transfer=payload.is_transfer,
     )
     db.add(rule)
     db.commit()
@@ -61,6 +63,12 @@ def apply_rule_to_existing(db: Session, user_id: UUID, rule: CategoryRule) -> in
 
     for transaction in matched:
         transaction.category_id = rule.category_id
+        # Só liga is_transfer, nunca desliga: a regra pode reconhecer um caso
+        # a mais (ex: pessoa específica) que `pluggy_category_map` não sabe,
+        # mas não deve desfazer uma transferência que a Pluggy já identificou
+        # certo por outro motivo.
+        if rule.is_transfer:
+            transaction.is_transfer = True
         db.add(transaction)
 
     db.commit()
@@ -87,11 +95,18 @@ def delete_rule(db: Session, rule: CategoryRule) -> None:
     db.commit()
 
 
-def build_keyword_map(db: Session, user_id: UUID) -> dict[str, str]:
-    """Returns {KEYWORD_UPPERCASE: str(category_id)} — highest priority keyword wins."""
+@dataclass(frozen=True)
+class KeywordRule:
+    category_id: str
+    is_transfer: bool
+
+
+def build_keyword_map(db: Session, user_id: UUID) -> dict[str, KeywordRule]:
+    """Returns {KEYWORD_UPPERCASE: KeywordRule(category_id, is_transfer)} —
+    highest priority keyword wins."""
     rules = list_rules(db, user_id)
-    result: dict[str, str] = {}
+    result: dict[str, KeywordRule] = {}
     for rule in rules:
         if rule.keyword not in result:
-            result[rule.keyword] = str(rule.category_id)
+            result[rule.keyword] = KeywordRule(str(rule.category_id), rule.is_transfer)
     return result

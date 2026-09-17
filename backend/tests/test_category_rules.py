@@ -39,7 +39,8 @@ def test_build_keyword_map_correct_dict(db_session, user):
     create_rule(db_session, user.id, CategoryRuleCreate(keyword="restaurante", category_id=cat.id))
     kmap = build_keyword_map(db_session, user.id)
     assert "RESTAURANTE" in kmap
-    assert kmap["RESTAURANTE"] == str(cat.id)
+    assert kmap["RESTAURANTE"].category_id == str(cat.id)
+    assert kmap["RESTAURANTE"].is_transfer is False
 
 
 def test_build_keyword_map_respects_priority(db_session, user):
@@ -55,7 +56,7 @@ def test_build_keyword_map_respects_priority(db_session, user):
     )
     kmap = build_keyword_map(db_session, user.id)
     # Higher priority wins — dict insertion order preserves ORDER BY priority DESC
-    assert kmap["COMUM"] == str(cat_high.id)
+    assert kmap["COMUM"].category_id == str(cat_high.id)
 
 
 def test_build_keyword_map_excludes_other_users(db_session, user, other_user):
@@ -240,3 +241,57 @@ def test_rule_does_not_touch_other_users_transactions(db_session, user, other_us
     assert apply_rule_to_existing(db_session, user.id, rule) == 0
     db_session.refresh(alheia)
     assert alheia.category_id is None
+
+
+def test_transfer_rule_marks_matched_transactions_as_transfer(db_session, user):
+    """Divisão de contas com uma pessoa específica: a Pluggy não tem como saber
+    que aquele PIX recebido não é receita de verdade — só a regra do usuário
+    sabe disso."""
+    from app.models.category import CategoryKind
+    from app.models.transaction import TransactionType
+
+    renda = _cat(db_session, user, "Outras receitas", kind=CategoryKind.INCOME)
+    recebido = _tx(db_session, user, "Transferência Recebida|NOIVA", tx_type=TransactionType.INCOME)
+
+    rule = create_rule(
+        db_session,
+        user.id,
+        CategoryRuleCreate(keyword="NOIVA", category_id=renda.id, is_transfer=True),
+    )
+
+    assert apply_rule_to_existing(db_session, user.id, rule) == 1
+    db_session.refresh(recebido)
+    assert recebido.category_id == renda.id
+    assert recebido.is_transfer is True
+
+
+def test_transfer_rule_never_turns_off_existing_transfer_flag(db_session, user):
+    """A regra só liga is_transfer, nunca desliga — uma transação que a Pluggy
+    já marcou como transferência por outro motivo não pode ser "destransferida"
+    por uma regra sem is_transfer."""
+    mercado = _cat(db_session, user, "Mercado")
+    ja_transferencia = _tx(db_session, user, "CONVENIENCIA POSTO")
+    ja_transferencia.is_transfer = True
+    db_session.add(ja_transferencia)
+    db_session.commit()
+
+    rule = create_rule(
+        db_session,
+        user.id,
+        CategoryRuleCreate(keyword="CONVENIENCIA", category_id=mercado.id, is_transfer=False),
+    )
+
+    apply_rule_to_existing(db_session, user.id, rule)
+    db_session.refresh(ja_transferencia)
+    assert ja_transferencia.is_transfer is True
+
+
+def test_build_keyword_map_carries_is_transfer(db_session, user):
+    cat = _make_category(db_session, user, "Outras receitas")
+    create_rule(
+        db_session,
+        user.id,
+        CategoryRuleCreate(keyword="noiva", category_id=cat.id, is_transfer=True),
+    )
+    kmap = build_keyword_map(db_session, user.id)
+    assert kmap["NOIVA"].is_transfer is True

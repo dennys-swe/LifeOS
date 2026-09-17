@@ -131,7 +131,7 @@ function NotificationsTab() {
 
 // ─── Category Rules ───────────────────────────────────────────────────────────
 
-const RULE_INITIAL = { keyword: "", category_id: "", priority: 0 };
+const RULE_INITIAL = { keyword: "", category_id: "", priority: 0, is_transfer: false };
 
 function RulesTab() {
   const { categories, refresh } = useFinance();
@@ -247,6 +247,15 @@ function RulesTab() {
                 className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-900 focus:border-emerald-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               />
             </label>
+            <label className="flex items-center gap-2 sm:col-span-3 text-xs font-semibold text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={form.is_transfer}
+                onChange={(e) => setForm((p) => ({ ...p, is_transfer: e.target.checked }))}
+                className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 dark:border-slate-700"
+              />
+              É transferência (ex: divisão de contas) — não conta como receita/gasto nos totais
+            </label>
             <div className="flex gap-3 sm:col-span-3 pt-2">
               <button type="submit" className="rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-500">
                 Salvar Regra
@@ -276,6 +285,11 @@ function RulesTab() {
                         {cat.name}
                       </span>
                     ) : <span className="text-xs text-slate-400">—</span>}
+                    {rule.is_transfer && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                        Transferência
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3">
