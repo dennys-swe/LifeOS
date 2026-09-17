@@ -1,9 +1,11 @@
 import os
 import sys
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -50,6 +52,26 @@ def db_session(monkeypatch):
     finally:
         session.close()
         Base.metadata.drop_all(bind=engine)
+
+
+@contextmanager
+def raw_test_client(db_session):
+    """TestClient sem override de `current_active_user` — exercita o fluxo
+    real de auth (register/login/JWT). Compartilhado entre `test_auth.py` e
+    `test_rate_limit.py`."""
+
+    def _get_db_override():
+        try:
+            yield db_session
+        finally:
+            pass
+
+    app.dependency_overrides[get_db] = _get_db_override
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
 
 
 def _make_user(db_session, email: str) -> User:

@@ -1,27 +1,15 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app.db.database import get_db
-from app.main import app
 from app.services.category_seed import DEFAULT_CATEGORIES
+from tests.conftest import raw_test_client
 
 
 @pytest.fixture()
 def raw_client(db_session):
-    """Client sem override de current_active_user — exercita o fluxo real de auth."""
-
-    def _get_db_override():
-        try:
-            yield db_session
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = _get_db_override
-    with TestClient(app) as test_client:
+    with raw_test_client(db_session) as test_client:
         yield test_client
-    app.dependency_overrides.clear()
 
 
 def _register(raw_client, email="dono@example.com", password="Sup3rSecreta!"):

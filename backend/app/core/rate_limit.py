@@ -30,12 +30,17 @@ def get_client_ip(request: Request) -> str:
     """IP real do cliente atrás do proxy do Render.
 
     `request.client.host` é o IP do proxy reverso, não do cliente — o real
-    vem em `X-Forwarded-For` (primeiro da lista). Sem o header (dev local,
-    ou teste), cai no host da conexão direta.
+    vem em `X-Forwarded-For`. Usa o **último** da lista, não o primeiro: o
+    Render (único proxy no caminho) anexa o IP real como o hop mais recente,
+    e qualquer coisa antes disso é o que o próprio cliente mandou no header
+    — se pegássemos o primeiro, bastaria o cliente mandar um
+    `X-Forwarded-For` forjado (e trocar o valor a cada request) pra escapar
+    do rate limit. Sem o header (dev local, ou teste), cai no host da
+    conexão direta.
     """
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        return forwarded.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
 
 
