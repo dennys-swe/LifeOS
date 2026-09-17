@@ -9,6 +9,10 @@ class CategoryRuleCreate(BaseModel):
     keyword: str = Field(min_length=1, max_length=100)
     category_id: UUID
     priority: int = 0
+    # Ex: transferência recebida de uma pessoa específica (divisão de contas)
+    # que não é receita de verdade — a categoria ainda serve pra exibição,
+    # mas exclui dos totais como qualquer outra transferência.
+    is_transfer: bool = False
 
 
 class CategoryRuleResponse(CategoryRuleCreate):

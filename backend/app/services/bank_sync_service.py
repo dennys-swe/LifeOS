@@ -446,10 +446,15 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         # Regra do usuário ganha da categoria da Pluggy: é override explícito
         # dele sobre a classificação automática.
         category_id = None
-        for keyword, mapped_id in keyword_map.items():
+        rule_is_transfer = False
+        for keyword, rule in keyword_map.items():
             if keyword in normalized:
-                category_id = _category_for_direction(UUID(mapped_id), tx_type, category_kind_by_id)
-                if category_id is not None:
+                resolved = _category_for_direction(
+                    UUID(rule.category_id), tx_type, category_kind_by_id
+                )
+                if resolved is not None:
+                    category_id = resolved
+                    rule_is_transfer = rule.is_transfer
                     break
         if category_id is None:
             mapped_name = category_name_for(
@@ -468,7 +473,9 @@ def sync_account(db: Session, account: BankAccount) -> dict:
             type=tx_type,
             source=candidate["source_key"],
             category_id=category_id,
-            is_transfer=is_transfer(pluggy_category, description),
+            # A regra só liga is_transfer, nunca desliga (ver
+            # `category_rule_service.apply_rule_to_existing`).
+            is_transfer=rule_is_transfer or is_transfer(pluggy_category, description),
             external_category=(pluggy_category or None),
         )
         db.add(new_tx)

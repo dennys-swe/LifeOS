@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.category import Category, CategoryKind
@@ -18,6 +19,7 @@ def create_rule(db: Session, user_id: UUID, payload: CategoryRuleCreate) -> Cate
         keyword=payload.keyword.strip().upper(),
         category_id=payload.category_id,
         priority=payload.priority,
+        is_transfer=payload.is_transfer,
     )
     db.add(rule)
     db.commit()
@@ -45,14 +47,29 @@ def apply_rule_to_existing(db: Session, user_id: UUID, rule: CategoryRule) -> in
         TransactionType.INCOME if category.kind == CategoryKind.INCOME else TransactionType.EXPENSE
     )
 
+    # Sem `rule.is_transfer`, só interessa quem muda de categoria (como sempre
+    # foi). Com `rule.is_transfer`, também precisa pegar quem já está na
+    # categoria certa mas ainda não está marcado como transferência — senão
+    # uma transação que a Pluggy já tinha jogado em "Outras receitas" (mesma
+    # categoria da regra) nunca seria selecionada, e `is_transfer` nunca
+    # ligaria pra ela (exatamente o caso de uso da divisão de contas).
+    needs_update = (
+        or_(
+            Transaction.category_id.is_distinct_from(rule.category_id),
+            Transaction.is_transfer.is_(False),
+        )
+        if rule.is_transfer
+        # `!=` não pegaria os sem categoria: em SQL, NULL != valor é NULL.
+        else Transaction.category_id.is_distinct_from(rule.category_id)
+    )
+
     matched = (
         db.execute(
             select(Transaction).where(
                 Transaction.user_id == user_id,
                 Transaction.type == wanted_type,
                 Transaction.description.ilike(f"%{rule.keyword}%"),
-                # `!=` não pegaria os sem categoria: em SQL, NULL != valor é NULL.
-                Transaction.category_id.is_distinct_from(rule.category_id),
+                needs_update,
             )
         )
         .scalars()
@@ -61,6 +78,12 @@ def apply_rule_to_existing(db: Session, user_id: UUID, rule: CategoryRule) -> in
 
     for transaction in matched:
         transaction.category_id = rule.category_id
+        # Só liga is_transfer, nunca desliga: a regra pode reconhecer um caso
+        # a mais (ex: pessoa específica) que `pluggy_category_map` não sabe,
+        # mas não deve desfazer uma transferência que a Pluggy já identificou
+        # certo por outro motivo.
+        if rule.is_transfer:
+            transaction.is_transfer = True
         db.add(transaction)
 
     db.commit()
@@ -87,11 +110,18 @@ def delete_rule(db: Session, rule: CategoryRule) -> None:
     db.commit()
 
 
-def build_keyword_map(db: Session, user_id: UUID) -> dict[str, str]:
-    """Returns {KEYWORD_UPPERCASE: str(category_id)} — highest priority keyword wins."""
+@dataclass(frozen=True)
+class KeywordRule:
+    category_id: str
+    is_transfer: bool
+
+
+def build_keyword_map(db: Session, user_id: UUID) -> dict[str, KeywordRule]:
+    """Returns {KEYWORD_UPPERCASE: KeywordRule(category_id, is_transfer)} —
+    highest priority keyword wins."""
     rules = list_rules(db, user_id)
-    result: dict[str, str] = {}
+    result: dict[str, KeywordRule] = {}
     for rule in rules:
         if rule.keyword not in result:
-            result[rule.keyword] = str(rule.category_id)
+            result[rule.keyword] = KeywordRule(str(rule.category_id), rule.is_transfer)
     return result
