@@ -3,7 +3,8 @@ from __future__ import annotations
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import Enum as SAEnum, ForeignKey, String, UniqueConstraint, Uuid
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy import ForeignKey, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -24,9 +25,7 @@ class CategoryKind(str, Enum):
 
 class Category(Base):
     __tablename__ = "categories"
-    __table_args__ = (
-        UniqueConstraint("user_id", "name", name="uq_categories_user_id_name"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_categories_user_id_name"),)
 
     id: Mapped[Uuid] = mapped_column(Uuid, primary_key=True, default=uuid4)
     user_id: Mapped[Uuid] = mapped_column(

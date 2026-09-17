@@ -48,9 +48,7 @@ def seed_default_categories(db: Session, user_id: UUID) -> None:
     """
     existing = {
         name
-        for (name,) in db.execute(
-            select(Category.name).where(Category.user_id == user_id)
-        ).all()
+        for (name,) in db.execute(select(Category.name).where(Category.user_id == user_id)).all()
     }
     for data in DEFAULT_CATEGORIES:
         if data["name"] not in existing:

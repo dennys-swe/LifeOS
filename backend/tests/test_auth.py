@@ -63,9 +63,7 @@ def test_login_returns_jwt_and_users_me_works(raw_client):
     token = login_response.json()["access_token"]
     assert token
 
-    me_response = raw_client.get(
-        "/users/me", headers={"Authorization": f"Bearer {token}"}
-    )
+    me_response = raw_client.get("/users/me", headers={"Authorization": f"Bearer {token}"})
     assert me_response.status_code == 200
     assert me_response.json()["email"] == "dono@example.com"
 

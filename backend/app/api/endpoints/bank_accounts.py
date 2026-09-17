@@ -35,7 +35,7 @@ def create_connect_token(
     try:
         token = bank_sync_service.get_connect_token(item_id=item_id)
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"access_token": token}
 
 
@@ -90,7 +90,9 @@ def delete_bank_account(
     return None
 
 
-@router.post("/{account_id}/sync", response_model=SyncStartedResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/{account_id}/sync", response_model=SyncStartedResponse, status_code=status.HTTP_202_ACCEPTED
+)
 def sync_bank_account(
     account_id: UUID,
     background_tasks: BackgroundTasks,
@@ -101,7 +103,9 @@ def sync_bank_account(
     if account is None:
         raise HTTPException(status_code=404, detail="Bank account not found")
     if not account.external_id:
-        raise HTTPException(status_code=400, detail="Conta sem item_id da Pluggy. Conecte o banco primeiro.")
+        raise HTTPException(
+            status_code=400, detail="Conta sem item_id da Pluggy. Conecte o banco primeiro."
+        )
     if not bank_sync_service.can_start_sync(account):
         return SyncStartedResponse(sync_status=account.sync_status)
 

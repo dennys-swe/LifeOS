@@ -5,6 +5,7 @@ dizia quanto nem quando, e o usuário precisava abrir o app para saber se aquilo
 era urgente. As notificações dos próprios bancos, na mesma tela de bloqueio,
 trazem valor e data.
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -37,7 +38,7 @@ def test_varias_contas_mostram_total_e_prazos():
 
 
 def test_competencia_sai_do_rotulo_da_fatura():
-    """"— 08/2026" é ruído em algo que vence agora e come o espaço da prévia."""
+    """ "— 08/2026" é ruído em algo que vence agora e come o espaço da prévia."""
     n = build_notification([_p("Fatura Nubank — 08/2026", "588.37", 8)], HOJE)
 
     assert n["title"] == "Fatura Nubank vence em 08/08"

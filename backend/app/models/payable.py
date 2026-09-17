@@ -3,7 +3,8 @@ from __future__ import annotations
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import Date, Enum as SAEnum, ForeignKey, Numeric, String, Uuid
+from sqlalchemy import Date, ForeignKey, Numeric, String, Uuid
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base

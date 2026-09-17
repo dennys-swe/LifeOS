@@ -42,20 +42,22 @@ def apply_rule_to_existing(db: Session, user_id: UUID, rule: CategoryRule) -> in
         return 0
 
     wanted_type = (
-        TransactionType.INCOME
-        if category.kind == CategoryKind.INCOME
-        else TransactionType.EXPENSE
+        TransactionType.INCOME if category.kind == CategoryKind.INCOME else TransactionType.EXPENSE
     )
 
-    matched = db.execute(
-        select(Transaction).where(
-            Transaction.user_id == user_id,
-            Transaction.type == wanted_type,
-            Transaction.description.ilike(f"%{rule.keyword}%"),
-            # `!=` não pegaria os sem categoria: em SQL, NULL != valor é NULL.
-            Transaction.category_id.is_distinct_from(rule.category_id),
+    matched = (
+        db.execute(
+            select(Transaction).where(
+                Transaction.user_id == user_id,
+                Transaction.type == wanted_type,
+                Transaction.description.ilike(f"%{rule.keyword}%"),
+                # `!=` não pegaria os sem categoria: em SQL, NULL != valor é NULL.
+                Transaction.category_id.is_distinct_from(rule.category_id),
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     for transaction in matched:
         transaction.category_id = rule.category_id
@@ -76,9 +78,7 @@ def list_rules(db: Session, user_id: UUID) -> List[CategoryRule]:
 
 def get_rule(db: Session, user_id: UUID, rule_id: UUID) -> Optional[CategoryRule]:
     return db.execute(
-        select(CategoryRule).where(
-            CategoryRule.id == rule_id, CategoryRule.user_id == user_id
-        )
+        select(CategoryRule).where(CategoryRule.id == rule_id, CategoryRule.user_id == user_id)
     ).scalar_one_or_none()
 
 

@@ -58,12 +58,16 @@ def delete_recurring(db: Session, rec: RecurringPayable) -> None:
 
 
 def generate_for_month(db: Session, user_id: UUID, month: int, year: int) -> List[Payable]:
-    actives = db.execute(
-        select(RecurringPayable).where(
-            RecurringPayable.user_id == user_id,
-            RecurringPayable.active == True,  # noqa: E712
+    actives = (
+        db.execute(
+            select(RecurringPayable).where(
+                RecurringPayable.user_id == user_id,
+                RecurringPayable.active == True,  # noqa: E712
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     start_date = date(year, month, 1)
     end_day = monthrange(year, month)[1]

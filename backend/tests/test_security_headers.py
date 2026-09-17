@@ -1,5 +1,6 @@
 """Hardening da issue #7: headers de segurança, CORS restrito e readiness
 check que realmente testa o banco (não só o processo)."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch

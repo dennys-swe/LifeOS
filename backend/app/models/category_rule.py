@@ -16,9 +16,7 @@ class CategoryRule(Base):
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     keyword: Mapped[str] = mapped_column(String(100), nullable=False)
-    category_id: Mapped[Uuid] = mapped_column(
-        Uuid, ForeignKey("categories.id"), nullable=False
-    )
+    category_id: Mapped[Uuid] = mapped_column(Uuid, ForeignKey("categories.id"), nullable=False)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     category = relationship("Category")

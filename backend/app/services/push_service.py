@@ -15,7 +15,6 @@ from app.models.payable import Payable, PayableStatus
 from app.models.push_subscription import PushSubscription
 from app.schemas.push_subscription import PushSubscriptionCreate
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -79,7 +78,7 @@ def _quando(due: date, today: date) -> str:
 
 
 def _rotulo(title: str) -> str:
-    """"Fatura Nubank — 08/2026" -> "Fatura Nubank".
+    """ "Fatura Nubank — 08/2026" -> "Fatura Nubank".
 
     A competência é ruído numa notificação sobre algo que vence agora, e come
     o espaço que o iOS reserva para a prévia.
@@ -109,9 +108,7 @@ def build_notification(upcoming: List[Payable], today: date) -> dict:
             "body": _brl(conta.amount),
         }
 
-    detalhes = ", ".join(
-        f"{_rotulo(p.title)} ({_quando(p.due_date, today)})" for p in upcoming[:3]
-    )
+    detalhes = ", ".join(f"{_rotulo(p.title)} ({_quando(p.due_date, today)})" for p in upcoming[:3])
     if len(upcoming) > 3:
         detalhes += f" e mais {len(upcoming) - 3}"
 
@@ -128,9 +125,9 @@ def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> in
     Returns the number of notifications sent.
     """
     try:
-        from pywebpush import webpush, WebPushException
-    except ImportError:
-        raise RuntimeError("pywebpush not installed. Add it to requirements.txt.")
+        from pywebpush import WebPushException, webpush
+    except ImportError as exc:
+        raise RuntimeError("pywebpush not installed. Add it to requirements.txt.") from exc
 
     vapid_private = settings.vapid_private_key
     vapid_claims_email = settings.vapid_claims_email or "mailto:admin@example.com"
@@ -140,25 +137,32 @@ def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> in
 
     today = date.today()
     until = today + timedelta(days=days)
-    upcoming = db.execute(
-        select(Payable).where(
-            Payable.user_id == user_id,
-            Payable.status == PayableStatus.PENDING,
-            Payable.due_date >= today,
-            Payable.due_date <= until,
+    upcoming = (
+        db.execute(
+            select(Payable)
+            .where(
+                Payable.user_id == user_id,
+                Payable.status == PayableStatus.PENDING,
+                Payable.due_date >= today,
+                Payable.due_date <= until,
+            )
+            # Sem ordenar, o banco devolve em ordem arbitrária e a notificação
+            # listava a conta de 08/08 antes da de 07/08. Numa mensagem truncada em
+            # 3 itens, a ordem decide o que o usuário chega a ler.
+            .order_by(Payable.due_date.asc(), Payable.amount.desc())
         )
-        # Sem ordenar, o banco devolve em ordem arbitrária e a notificação
-        # listava a conta de 08/08 antes da de 07/08. Numa mensagem truncada em
-        # 3 itens, a ordem decide o que o usuário chega a ler.
-        .order_by(Payable.due_date.asc(), Payable.amount.desc())
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     if not upcoming:
         return 0
 
-    subscriptions: List[PushSubscription] = db.execute(
-        select(PushSubscription).where(PushSubscription.user_id == user_id)
-    ).scalars().all()
+    subscriptions: List[PushSubscription] = (
+        db.execute(select(PushSubscription).where(PushSubscription.user_id == user_id))
+        .scalars()
+        .all()
+    )
 
     payload_data = json.dumps(build_notification(upcoming, today))
 

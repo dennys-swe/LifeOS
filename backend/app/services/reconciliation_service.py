@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import timedelta
 from decimal import Decimal
 from typing import List
 from uuid import UUID
@@ -35,10 +33,7 @@ def _reconcilable(tx: Transaction) -> bool:
     `_confirm_bill_payment_echoes` já sabe preferir o débito real quando as duas
     pontas aparecem.
     """
-    return (
-        tx.type == TransactionType.EXPENSE
-        or tx.external_category == CREDIT_CARD_PAYMENT
-    )
+    return tx.type == TransactionType.EXPENSE or tx.external_category == CREDIT_CARD_PAYMENT
 
 
 def _is_reconcilable():
@@ -66,17 +61,21 @@ def suggest_pending(db: Session, user_id: UUID) -> List[ReconciliationSuggestion
     devolver a lista — o auto-reconcile do sync só enxerga as transações
     recém-importadas daquele request, então casos óbvios (ex: eco de
     pagamento de fatura) de transações mais antigas só se resolvem aqui."""
-    unreconciled = db.execute(
-        select(Transaction).where(
-            Transaction.user_id == user_id,
-            _is_reconcilable(),
-            ~Transaction.id.in_(
-                select(Payable.transaction_id).where(
-                    Payable.user_id == user_id, Payable.transaction_id.is_not(None)
-                )
-            ),
+    unreconciled = (
+        db.execute(
+            select(Transaction).where(
+                Transaction.user_id == user_id,
+                _is_reconcilable(),
+                ~Transaction.id.in_(
+                    select(Payable.transaction_id).where(
+                        Payable.user_id == user_id, Payable.transaction_id.is_not(None)
+                    )
+                ),
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     suggestions = suggest_reconciliation(db, user_id, unreconciled)
     auto_confirmed = auto_reconcile_confident_matches(db, user_id, suggestions)
     return drop_resolved_payables(suggestions, auto_confirmed)
@@ -98,11 +97,15 @@ def suggest_reconciliation(
     user_id: UUID,
     transactions: List[Transaction],
 ) -> List[ReconciliationSuggestionResponse]:
-    pending_payables = db.execute(
-        select(Payable).where(
-            Payable.user_id == user_id, Payable.status == PayableStatus.PENDING
+    pending_payables = (
+        db.execute(
+            select(Payable).where(
+                Payable.user_id == user_id, Payable.status == PayableStatus.PENDING
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     suggestions: List[ReconciliationSuggestionResponse] = []
 
@@ -160,8 +163,7 @@ def _suppress_weaker_amount_matches(
     coincidiu de valor). Remove os aproximados nesse caso."""
     exact_payables = {s.payable_id for s in suggestions if s.confidence_score >= 0.8}
     return [
-        s for s in suggestions
-        if s.confidence_score >= 0.8 or s.payable_id not in exact_payables
+        s for s in suggestions if s.confidence_score >= 0.8 or s.payable_id not in exact_payables
     ]
 
 
@@ -171,7 +173,9 @@ def _bill_payable_ids(db: Session, user_id: UUID) -> set[UUID]:
             select(CreditCardBill.payable_id).where(
                 CreditCardBill.user_id == user_id, CreditCardBill.payable_id.is_not(None)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
 
 
@@ -236,7 +240,11 @@ def _auto_resolve_bill_payment_echoes(
     for payable_id, group in candidates.items():
         if payable_id not in bill_payable_ids:
             continue
-        specific = [s for s in group if s.transaction_description.strip().upper() not in GENERIC_BILL_PAYMENT_ECHOES]
+        specific = [
+            s
+            for s in group
+            if s.transaction_description.strip().upper() not in GENERIC_BILL_PAYMENT_ECHOES
+        ]
         if len(specific) != 1:
             continue
         try:
@@ -263,9 +271,7 @@ def confirm_reconciliation(
         raise ValueError(f"Payable {payable_id} not found")
 
     transaction = db.execute(
-        select(Transaction).where(
-            Transaction.id == transaction_id, Transaction.user_id == user_id
-        )
+        select(Transaction).where(Transaction.id == transaction_id, Transaction.user_id == user_id)
     ).scalar_one_or_none()
     if transaction is None:
         raise ValueError(f"Transaction {transaction_id} not found")

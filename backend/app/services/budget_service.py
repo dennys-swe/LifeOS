@@ -13,9 +13,7 @@ from app.schemas.budget import BudgetCreate
 
 def list_budgets(db: Session, user_id: UUID, month: int, year: int) -> List[Budget]:
     result = db.execute(
-        select(Budget).where(
-            Budget.user_id == user_id, Budget.month == month, Budget.year == year
-        )
+        select(Budget).where(Budget.user_id == user_id, Budget.month == month, Budget.year == year)
     )
     return result.scalars().all()
 

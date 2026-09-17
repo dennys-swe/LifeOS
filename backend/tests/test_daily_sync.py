@@ -35,6 +35,7 @@ def test_run_processes_user_and_generates_recurring_payables(db_session, user):
     assert result["synced_accounts"] == 0
 
     from app.models.payable import Payable
+
     generated = (
         db_session.query(Payable)
         .filter(Payable.user_id == user.id, Payable.title == "Academia")
@@ -76,9 +77,6 @@ def test_daily_sync_endpoint_accepts_correct_secret(client, monkeypatch):
     # um CRON_SECRET no .env local (e falhava em qualquer ambiente limpo, CI
     # incluído).
     monkeypatch.setattr(settings, "cron_secret", "test-cron-secret")
-    response = client.post(
-        "/jobs/daily-sync", headers={"X-Cron-Secret": "test-cron-secret"}
-    )
+    response = client.post("/jobs/daily-sync", headers={"X-Cron-Secret": "test-cron-secret"})
     assert response.status_code == 200
     assert "processed_users" in response.json()
-

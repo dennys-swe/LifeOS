@@ -89,17 +89,29 @@ def seed(reset: bool = False) -> None:
         db.add_all(
             [
                 RecurringPayable(
-                    user_id=user.id, title="Aluguel", amount=Decimal("1800.00"),
-                    day_of_month=5, active=True, start_date=date(today.year, 1, 1),
+                    user_id=user.id,
+                    title="Aluguel",
+                    amount=Decimal("1800.00"),
+                    day_of_month=5,
+                    active=True,
+                    start_date=date(today.year, 1, 1),
                     category_id=moradia.id if moradia else None,
                 ),
                 RecurringPayable(
-                    user_id=user.id, title="Internet", amount=Decimal("120.00"),
-                    day_of_month=12, active=True, start_date=date(today.year, 1, 1),
+                    user_id=user.id,
+                    title="Internet",
+                    amount=Decimal("120.00"),
+                    day_of_month=12,
+                    active=True,
+                    start_date=date(today.year, 1, 1),
                 ),
                 RecurringPayable(
-                    user_id=user.id, title="Academia", amount=Decimal("99.90"),
-                    day_of_month=10, active=True, start_date=date(today.year, 1, 1),
+                    user_id=user.id,
+                    title="Academia",
+                    amount=Decimal("99.90"),
+                    day_of_month=10,
+                    active=True,
+                    start_date=date(today.year, 1, 1),
                 ),
             ]
         )
@@ -107,21 +119,33 @@ def seed(reset: bool = False) -> None:
         db.add_all(
             [
                 Payable(
-                    user_id=user.id, title="Conta de luz", amount=Decimal("210.45"),
-                    due_date=today + timedelta(days=4), status=PayableStatus.PENDING,
+                    user_id=user.id,
+                    title="Conta de luz",
+                    amount=Decimal("210.45"),
+                    due_date=today + timedelta(days=4),
+                    status=PayableStatus.PENDING,
                     category_id=moradia.id if moradia else None,
                 ),
                 Payable(
-                    user_id=user.id, title="Água", amount=Decimal("88.10"),
-                    due_date=today + timedelta(days=9), status=PayableStatus.PENDING,
+                    user_id=user.id,
+                    title="Água",
+                    amount=Decimal("88.10"),
+                    due_date=today + timedelta(days=9),
+                    status=PayableStatus.PENDING,
                 ),
                 Payable(
-                    user_id=user.id, title="IPTU (parcela)", amount=Decimal("143.00"),
-                    due_date=today - timedelta(days=3), status=PayableStatus.PENDING,
+                    user_id=user.id,
+                    title="IPTU (parcela)",
+                    amount=Decimal("143.00"),
+                    due_date=today - timedelta(days=3),
+                    status=PayableStatus.PENDING,
                 ),
                 Payable(
-                    user_id=user.id, title="Plano de saúde", amount=Decimal("389.00"),
-                    due_date=today - timedelta(days=10), status=PayableStatus.PAID,
+                    user_id=user.id,
+                    title="Plano de saúde",
+                    amount=Decimal("389.00"),
+                    due_date=today - timedelta(days=10),
+                    status=PayableStatus.PAID,
                     payment_date=today - timedelta(days=10),
                 ),
             ]
@@ -130,13 +154,23 @@ def seed(reset: bool = False) -> None:
         db.add_all(
             [
                 Transaction(
-                    user_id=user.id, date=today - timedelta(days=d), description=desc,
-                    amount=Decimal(str(amount)), type=ttype,
+                    user_id=user.id,
+                    date=today - timedelta(days=d),
+                    description=desc,
+                    amount=Decimal(str(amount)),
+                    type=ttype,
                     is_transfer=is_transfer,
                     category_id=(cat.id if cat else None),
                 )
                 for d, desc, amount, ttype, is_transfer, cat in [
-                    (1, "SUPERMERCADO BOM PRECO", "245.90", TransactionType.EXPENSE, False, alimentacao),
+                    (
+                        1,
+                        "SUPERMERCADO BOM PRECO",
+                        "245.90",
+                        TransactionType.EXPENSE,
+                        False,
+                        alimentacao,
+                    ),
                     (2, "POSTO SHELL", "180.00", TransactionType.EXPENSE, False, transporte),
                     (3, "IFOOD *RESTAURANTE", "54.30", TransactionType.EXPENSE, False, alimentacao),
                     (4, "UBER *TRIP", "23.80", TransactionType.EXPENSE, False, transporte),
@@ -149,8 +183,11 @@ def seed(reset: bool = False) -> None:
         )
 
         account = BankAccount(
-            user_id=user.id, name="Conta corrente (dev)", bank_name="Banco Dev",
-            account_type="checking", external_id="dev-item-0001",
+            user_id=user.id,
+            name="Conta corrente (dev)",
+            bank_name="Banco Dev",
+            account_type="checking",
+            external_id="dev-item-0001",
         )
         db.add(account)
         db.flush()
@@ -158,16 +195,24 @@ def seed(reset: bool = False) -> None:
         db.add_all(
             [
                 CreditCardBill(
-                    user_id=user.id, bank_account_id=account.id,
-                    pluggy_account_id="dev-card-0001", external_id="dev-bill-closed",
-                    card_name="Cartão Dev", due_date=today - timedelta(days=2),
-                    total_amount=Decimal("1340.00"), status=CreditCardBillStatus.CLOSED,
+                    user_id=user.id,
+                    bank_account_id=account.id,
+                    pluggy_account_id="dev-card-0001",
+                    external_id="dev-bill-closed",
+                    card_name="Cartão Dev",
+                    due_date=today - timedelta(days=2),
+                    total_amount=Decimal("1340.00"),
+                    status=CreditCardBillStatus.CLOSED,
                 ),
                 CreditCardBill(
-                    user_id=user.id, bank_account_id=account.id,
-                    pluggy_account_id="dev-card-0001", external_id="dev-bill-open",
-                    card_name="Cartão Dev", due_date=today + timedelta(days=26),
-                    total_amount=Decimal("612.55"), status=CreditCardBillStatus.OPEN,
+                    user_id=user.id,
+                    bank_account_id=account.id,
+                    pluggy_account_id="dev-card-0001",
+                    external_id="dev-bill-open",
+                    card_name="Cartão Dev",
+                    due_date=today + timedelta(days=26),
+                    total_amount=Decimal("612.55"),
+                    status=CreditCardBillStatus.OPEN,
                 ),
             ]
         )
