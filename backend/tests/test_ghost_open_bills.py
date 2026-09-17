@@ -5,7 +5,7 @@ item, mas nada parava de gerar conta a pagar pra ele — a fatura em aberto
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -16,6 +16,28 @@ from app.models.bank_account import BankAccount
 from app.models.credit_card_bill import CreditCardBill, CreditCardBillStatus
 from app.models.payable import Payable, PayableStatus
 from app.services import bank_sync_service
+
+
+def _age_open_bills(db, user, days):
+    """Simula que a fatura foi sincronizada pela última vez há `days` dias —
+    a carência de `retire_vanished_open_bills` (issue #25, achado na
+    revisão: um glitch transitório da Pluggy não pode apagar fatura de
+    cartão que continua ativo) só libera a retirada depois de 2 dias sem o
+    cartão aparecer."""
+    bills = (
+        db.execute(
+            select(CreditCardBill).where(
+                CreditCardBill.user_id == user.id,
+                CreditCardBill.status == CreditCardBillStatus.OPEN,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for bill in bills:
+        bill.synced_at = datetime.now(timezone.utc) - timedelta(days=days)
+        db.add(bill)
+    db.commit()
 
 
 def _account(db, user) -> BankAccount:
@@ -107,7 +129,9 @@ def test_card_that_vanishes_has_its_ghost_bill_and_payable_retired(db_session, u
     payable_ids_before = {b.pluggy_account_id: b.payable_id for b in open_bills}
     assert all(payable_ids_before.values())
 
-    # 2ª sincronização: card-b sumiu do item (cancelado)
+    # 2ª sincronização, 3 dias depois (fora da carência): card-b sumiu do
+    # item (cancelado)
+    _age_open_bills(db_session, user, days=3)
     result = _sync_two_cards(db_session, acc, ["card-a"])
 
     assert result["retired_open_bills"] == 1
@@ -153,6 +177,7 @@ def test_paid_payable_of_a_vanished_card_is_never_touched(db_session, user):
     db_session.add(payable_b)
     db_session.commit()
 
+    _age_open_bills(db_session, user, days=3)
     result = _sync_two_cards(db_session, acc, ["card-a"])
 
     # a fatura OPEN órfã ainda é removida (não é mais o ciclo corrente)...
@@ -161,6 +186,36 @@ def test_paid_payable_of_a_vanished_card_is_never_touched(db_session, user):
     still_there = db_session.get(Payable, payable_b.id)
     assert still_there is not None
     assert still_there.status == PayableStatus.PAID
+
+
+def test_a_single_missing_sync_does_not_retire_yet(db_session, user):
+    """Achado na revisão do PR desta issue: `accounts_list` pode devolver uma
+    resposta parcial (não vazia, só incompleta) por um glitch transitório —
+    retirar na primeira passada em que um cartão ainda ativo não aparece
+    apagaria fatura/payable reais por causa de uma falha de rede."""
+    acc = _account(db_session, user)
+    _sync_two_cards(db_session, acc, ["card-a", "card-b"])
+
+    bill_b = (
+        db_session.execute(
+            select(CreditCardBill).where(
+                CreditCardBill.user_id == user.id,
+                CreditCardBill.pluggy_account_id == "card-b",
+                CreditCardBill.status == CreditCardBillStatus.OPEN,
+            )
+        )
+        .scalars()
+        .one()
+    )
+    payable_b_id = bill_b.payable_id
+
+    # card-b não aparece nesta passada, mas o bill foi sincronizado com
+    # sucesso há poucos minutos — ainda dentro da carência
+    result = _sync_two_cards(db_session, acc, ["card-a"])
+
+    assert result["retired_open_bills"] == 0
+    assert db_session.get(CreditCardBill, bill_b.id) is not None
+    assert db_session.get(Payable, payable_b_id) is not None
 
 
 def test_empty_accounts_list_does_not_retire_anything(db_session, user):

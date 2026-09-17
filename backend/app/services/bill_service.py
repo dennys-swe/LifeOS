@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
@@ -267,11 +267,24 @@ def upsert_open_bill(
     return bill
 
 
+# Achado na revisão do PR da issue #25: `accounts_list` pode devolver uma
+# resposta parcial (não vazia, só incompleta — glitch transitório da Pluggy)
+# omitindo um cartão que continua ativo. Retirar na primeira passada em que
+# ele não aparece apagaria fatura/payable reais por causa de uma falha de
+# rede, não de um cancelamento de verdade. `synced_at` (grava a cada sync
+# bem-sucedido) já existe no modelo — usado como carência: só retira quem
+# ficou "sumido" por mais de um ciclo inteiro de sync (o cron diário roda
+# uma vez por dia; webhooks disparam mais frequente ainda).
+_RETIRE_GRACE_PERIOD = timedelta(days=2)
+
+
 def retire_vanished_open_bills(
     db: Session,
     user_id: UUID,
     account: BankAccount,
     seen_pluggy_account_ids: set[str],
+    *,
+    now: Optional[datetime] = None,
 ) -> int:
     """Cartão cancelado/desativado some da resposta da Pluggy pro item, mas
     nada parava de gerar conta a pagar pra ele (issue #25) — a fatura em
@@ -287,6 +300,7 @@ def retire_vanished_open_bills(
     glitch transitório não pode apagar fatura/payable de todo mundo; quem
     chama já pula esta função nesse caso.
     """
+    now = now or datetime.now(timezone.utc)
     ghost_bills = (
         db.execute(
             select(CreditCardBill).where(
@@ -300,17 +314,26 @@ def retire_vanished_open_bills(
         .all()
     )
 
+    retired = 0
     for bill in ghost_bills:
+        synced_at = bill.synced_at
+        if synced_at.tzinfo is None:
+            synced_at = synced_at.replace(tzinfo=timezone.utc)
+        if now - synced_at < _RETIRE_GRACE_PERIOD:
+            # sumiu só nesta passada — pode ser um glitch, dá mais uma chance
+            continue
+
         if bill.payable_id is not None:
             payable = db.get(Payable, bill.payable_id)
             if payable is not None and payable.status == PayableStatus.PENDING:
                 db.delete(payable)
         db.delete(bill)
+        retired += 1
 
-    if ghost_bills:
+    if retired:
         db.commit()
 
-    return len(ghost_bills)
+    return retired
 
 
 def update_bill_customization(
