@@ -510,6 +510,27 @@ def test_different_purchases_same_amount_far_apart_are_not_merged(db_session, us
     assert db_session.query(Transaction).count() == 2
 
 
+def test_reissue_across_different_syncs_is_deduped(db_session, user):
+    """Achado em produção: duas "PAGAMENTO COM SALDO" de mesmo valor e mesma
+    data, `source` diferente, sobreviveram como 2 linhas — a reemissão do
+    banco caiu num sync **posterior** ao original. `_dedup_cross_feed_duplicates`
+    só compara candidatos dentro do mesmo sync, então não pegava esse caso."""
+    acc = _account(db_session, user)
+
+    _sync(
+        db_session,
+        acc,
+        [_tx("4d812486", 925.92, "PAGAMENTO COM SALDO", tipo="CREDIT", dia="2026-08-08")],
+    )
+    _sync(
+        db_session,
+        acc,
+        [_tx("b86064ef", 925.92, "PAGAMENTO COM SALDO", tipo="CREDIT", dia="2026-08-08")],
+    )
+
+    assert db_session.query(Transaction).count() == 1
+
+
 def test_different_amounts_same_description_are_not_merged(db_session, user):
     acc = _account(db_session, user)
 

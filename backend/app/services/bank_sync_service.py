@@ -251,6 +251,64 @@ def _dedup_cross_feed_duplicates(candidates: List[dict]) -> tuple[List[dict], in
     return survivors, removed
 
 
+def _dedup_against_existing(
+    db: Session, user_id: UUID, candidates: List[dict]
+) -> tuple[List[dict], int]:
+    """Mesma comparação de `_dedup_cross_feed_duplicates`, mas contra
+    transações já persistidas de syncs anteriores.
+
+    `_dedup_cross_feed_duplicates` só compara candidatos **entre si**, dentro
+    do mesmo sync — uma reemissão do banco que caia num sync diferente da
+    original nunca é comparada contra ela, porque o `source=pluggy:{id}`
+    (a única checagem contra o banco) não pega (o id mudou). Confirmado em
+    produção: duas transações "PAGAMENTO COM SALDO" de mesmo valor e mesma
+    data, `source` diferente, sobreviveram como duas linhas — a reemissão
+    chegou num sync posterior ao original.
+    """
+    if not candidates:
+        return candidates, 0
+
+    dates = [
+        bill_service.parse_pluggy_date(c["tx"]["date"]) for c in candidates if c["tx"].get("date")
+    ]
+    if not dates:
+        return candidates, 0
+
+    existing = db.execute(
+        select(Transaction.amount, Transaction.description, Transaction.date).where(
+            Transaction.user_id == user_id,
+            Transaction.date >= min(dates) - timedelta(days=2),
+            Transaction.date <= max(dates) + timedelta(days=2),
+        )
+    ).all()
+    existing_normalized = [
+        (Decimal(str(amount)), _normalize_purchase_description(description), tx_date)
+        for amount, description, tx_date in existing
+    ]
+
+    survivors: List[dict] = []
+    removed = 0
+    for candidate in candidates:
+        tx = candidate["tx"]
+        amount = Decimal(str(tx.get("amount", 0) or 0))
+        description = _normalize_purchase_description(tx.get("description"))
+        tx_date = bill_service.parse_pluggy_date(tx["date"]) if tx.get("date") else None
+
+        duplicate = tx_date is not None and any(
+            amount == ex_amount
+            and abs((tx_date - ex_date).days) <= 2
+            and _same_purchase_description(description, ex_description)
+            for ex_amount, ex_description, ex_date in existing_normalized
+        )
+
+        if duplicate:
+            removed += 1
+        else:
+            survivors.append(candidate)
+
+    return survivors, removed
+
+
 def sync_account(db: Session, account: BankAccount) -> dict:
     if not account.external_id:
         raise ValueError("Conta sem item_id da Pluggy. Conecte o banco primeiro.")
@@ -431,6 +489,8 @@ def sync_account(db: Session, account: BankAccount) -> dict:
 
     candidates, cross_feed_duplicates = _dedup_cross_feed_duplicates(candidates)
     skipped += cross_feed_duplicates
+    candidates, cross_sync_duplicates = _dedup_against_existing(db, account.user_id, candidates)
+    skipped += cross_sync_duplicates
 
     for candidate in candidates:
         tx = candidate["tx"]
