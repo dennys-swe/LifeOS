@@ -66,19 +66,24 @@ def _sync(db, acc, txs):
 
 
 def _count_dedup_selects(db_session, fn):
-    """Conta só os SELECTs que checam `source` — não os refresh() por linha
-    após o INSERT (`WHERE transactions.id = ?`, um padrão N+1 diferente,
-    fora do escopo da issue #8: aqui o que importa é o dedup não custar uma
-    query por transação candidata)."""
+    """Conta só o SELECT que carrega `existing_sources` (projeta a coluna
+    `source`) — não os refresh() por linha após o INSERT (`WHERE
+    transactions.id = ?`, um padrão N+1 diferente, fora do escopo da issue #8)
+    nem o SELECT do dedup por similaridade contra transações já persistidas
+    (`_dedup_against_existing`, filtra por `source IS NOT NULL` mas projeta
+    amount/description/date, não `source` — checagem pelo SELECT, não pelo
+    WHERE, pra não confundir os dois)."""
     engine = db_session.get_bind()
     selects = []
 
     def _listener(conn, cursor, statement, parameters, context, executemany):
-        normalized = statement.strip().upper()
-        if normalized.startswith("SELECT") and "FROM TRANSACTIONS" not in normalized:
+        normalized = " ".join(statement.split()).upper()
+        if not normalized.startswith("SELECT") or "FROM TRANSACTIONS" not in normalized:
             return
-        where_clause = normalized.split("WHERE", 1)[-1] if "WHERE" in normalized else ""
-        if normalized.startswith("SELECT") and "SOURCE" in where_clause:
+        # A query de `existing_sources` projeta só essa coluna — diferente do
+        # refresh() por linha (projeta todas) e do dedup por similaridade
+        # (projeta amount/description/date).
+        if normalized.startswith("SELECT TRANSACTIONS.SOURCE FROM TRANSACTIONS"):
             selects.append(statement)
 
     event.listen(engine, "before_cursor_execute", _listener)

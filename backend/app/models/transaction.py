@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, Date, ForeignKey, Index, Numeric, String, UniqueConstraint, Uuid
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +26,10 @@ class Transaction(Base):
         # reintroduza um INSERT duplicado. NULL não colide consigo mesmo em
         # Postgres, então transações manuais (source=None) não são afetadas.
         UniqueConstraint("user_id", "source", name="uq_transactions_user_id_source"),
+        # Suporta o dedup por similaridade contra transações já persistidas
+        # (bank_sync_service._dedup_against_existing, issue de dedup entre
+        # syncs) — sem isso, cada sync faz um range scan em `date` sem índice.
+        Index("ix_transactions_user_id_date", "user_id", "date"),
     )
 
     id: Mapped[Uuid] = mapped_column(Uuid, primary_key=True, default=uuid4)

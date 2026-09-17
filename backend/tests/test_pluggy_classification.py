@@ -510,6 +510,57 @@ def test_different_purchases_same_amount_far_apart_are_not_merged(db_session, us
     assert db_session.query(Transaction).count() == 2
 
 
+def test_reissue_across_different_syncs_is_deduped(db_session, user):
+    """Achado em produção: duas "PAGAMENTO COM SALDO" de mesmo valor e mesma
+    data, `source` diferente, sobreviveram como 2 linhas — a reemissão do
+    banco caiu num sync **posterior** ao original. `_dedup_cross_feed_duplicates`
+    só compara candidatos dentro do mesmo sync, então não pegava esse caso."""
+    acc = _account(db_session, user)
+
+    _sync(
+        db_session,
+        acc,
+        [_tx("4d812486", 925.92, "PAGAMENTO COM SALDO", tipo="CREDIT", dia="2026-08-08")],
+    )
+    _sync(
+        db_session,
+        acc,
+        [_tx("b86064ef", 925.92, "PAGAMENTO COM SALDO", tipo="CREDIT", dia="2026-08-08")],
+    )
+
+    assert db_session.query(Transaction).count() == 1
+
+
+def test_manual_transaction_never_suppresses_a_real_sync_candidate(db_session, user):
+    """Achado do /code-review: `_dedup_against_existing` comparava contra
+    QUALQUER transação do usuário, inclusive lançamentos manuais — violando o
+    invariante documentado em `Transaction` (`source=None` nunca colide com
+    nada). Sem a checagem de `source`, um lançamento manual coincidindo em
+    valor+descrição+data apagaria uma transação real da Pluggy silenciosamente,
+    e ela voltaria a ser descartada em todo sync seguinte (nunca é persistida)."""
+    from datetime import date
+
+    acc = _account(db_session, user)
+    manual = Transaction(
+        user_id=user.id,
+        date=date(2026, 9, 10),
+        description="Pix enviado",
+        amount=Decimal("50.00"),
+        type=TransactionType.EXPENSE,
+        source=None,
+    )
+    db_session.add(manual)
+    db_session.commit()
+
+    _sync(
+        db_session,
+        acc,
+        [_tx("real-tx", 50.0, "Pix enviado", tipo="DEBIT", dia="2026-09-11")],
+    )
+
+    assert db_session.query(Transaction).count() == 2
+
+
 def test_different_amounts_same_description_are_not_merged(db_session, user):
     acc = _account(db_session, user)
 
