@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date as date_type
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -184,6 +185,69 @@ def _category_for_direction(
     return category_id if kind == wanted else None
 
 
+# "Compra débito POSTO CASARAO II" / "POSTO CASARAO IICRATOBRA" / "Posto
+# Casarao Ii" — o mesmo evento vem com prefixo e sufixo (cidade/país) que
+# variam por feed (issue #32).
+_DEBIT_CREDIT_PREFIX = re.compile(r"^\s*compra\s+(d[ée]bito|cr[ée]dito)\s+", re.IGNORECASE)
+
+
+def _normalize_purchase_description(description: Optional[str]) -> str:
+    text = _DEBIT_CREDIT_PREFIX.sub("", description or "")
+    return re.sub(r"\s+", " ", text.strip().upper())
+
+
+def _same_purchase_description(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    return a in b or b in a
+
+
+def _dedup_cross_feed_duplicates(candidates: List[dict]) -> tuple[List[dict], int]:
+    """Remove duplicatas da mesma compra reportada mais de uma vez pela Pluggy.
+
+    Issue #32: uma conta "Múltiplo" (débito+crédito no mesmo plástico) e
+    reemissões do banco fazem o mesmo evento aparecer com `id`s diferentes —
+    às vezes no mesmo feed (a Pluggy reprocessa o lançamento), às vezes em
+    feeds diferentes do mesmo item (conta corrente e cartão). A chave exata
+    `source=pluggy:{id}` não pega porque o id muda, então aqui a comparação é
+    por similaridade: mesmo valor + descrição normalizada uma contida na outra
+    + data dentro de ±2 dias. Mantém a primeira ocorrência.
+
+    Cada `candidate` é um dict com a chave `tx` (dict cru da Pluggy). Só
+    compara candidatos entre si (o dedup contra o que já está no banco
+    continua sendo o `source=pluggy:{id}` de sempre, antes de chegar aqui).
+    """
+    survivors: List[dict] = []
+    removed = 0
+    for candidate in candidates:
+        tx = candidate["tx"]
+        amount = Decimal(str(tx.get("amount", 0) or 0))
+        description = _normalize_purchase_description(tx.get("description"))
+        tx_date = _parse_pluggy_date(tx["date"]) if tx.get("date") else None
+
+        duplicate = False
+        for kept in survivors:
+            kept_tx = kept["tx"]
+            if amount != Decimal(str(kept_tx.get("amount", 0) or 0)):
+                continue
+            if not _same_purchase_description(
+                description, _normalize_purchase_description(kept_tx.get("description"))
+            ):
+                continue
+            kept_date = _parse_pluggy_date(kept_tx["date"]) if kept_tx.get("date") else None
+            if tx_date is None or kept_date is None or abs((tx_date - kept_date).days) > 2:
+                continue
+            duplicate = True
+            break
+
+        if duplicate:
+            removed += 1
+        else:
+            survivors.append(candidate)
+
+    return survivors, removed
+
+
 def sync_account(db: Session, account: BankAccount) -> dict:
     if not account.external_id:
         raise ValueError("Conta sem item_id da Pluggy. Conecte o banco primeiro.")
@@ -194,6 +258,9 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     bills_synced = 0
     open_bills_synced = 0
     new_transactions: List[Transaction] = []
+    # Candidatas de todas as contas do item, para dedup por similaridade entre
+    # feeds antes de inserir (issue #32) — ver `_dedup_cross_feed_duplicates`.
+    candidates: List[dict] = []
     keyword_map = build_keyword_map(db, account.user_id)
     # Garante que as categorias que o mapa da Pluggy referencia existem — quem
     # se registrou antes de "Saúde"/"Compras"/"Taxas"/"Seguros" entrarem no
@@ -283,46 +350,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         skipped += 1
                         continue
 
-                    amount_raw = tx.get("amount", 0) or 0
-                    tx_type = _transaction_type(tx)
-                    tx_date = _parse_pluggy_date(tx["date"]) if tx.get("date") else date_type.today()
-                    description = (tx.get("description") or "")[:255]
-                    normalized = description.upper()
-                    pluggy_category = tx.get("category")
-
-                    # Regra do usuário ganha da categoria da Pluggy: é override
-                    # explícito dele sobre a classificação automática.
-                    category_id = None
-                    for keyword, mapped_id in keyword_map.items():
-                        if keyword in normalized:
-                            category_id = _category_for_direction(
-                                UUID(mapped_id), tx_type, category_kind_by_id
-                            )
-                            if category_id is not None:
-                                break
-                    if category_id is None:
-                        mapped_name = category_name_for(
-                            pluggy_category, is_income=(tx_type == TransactionType.INCOME)
-                        )
-                        if mapped_name:
-                            category_id = _category_for_direction(
-                                category_ids_by_name.get(mapped_name), tx_type, category_kind_by_id
-                            )
-
-                    new_tx = Transaction(
-                        user_id=account.user_id,
-                        date=tx_date,
-                        description=description,
-                        amount=Decimal(str(abs(amount_raw))),
-                        type=tx_type,
-                        source=source_key,
-                        category_id=category_id,
-                        is_transfer=is_transfer(pluggy_category, description),
-                        external_category=(pluggy_category or None),
-                    )
-                    db.add(new_tx)
-                    new_transactions.append(new_tx)
-                    imported += 1
+                    candidates.append({"tx": tx, "source_key": source_key})
 
                 if page >= total_pages:
                     break
@@ -352,6 +380,52 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         exc,
                         exc_info=True,
                     )
+
+    candidates, cross_feed_duplicates = _dedup_cross_feed_duplicates(candidates)
+    skipped += cross_feed_duplicates
+
+    for candidate in candidates:
+        tx = candidate["tx"]
+        amount_raw = tx.get("amount", 0) or 0
+        tx_type = _transaction_type(tx)
+        tx_date = _parse_pluggy_date(tx["date"]) if tx.get("date") else date_type.today()
+        description = (tx.get("description") or "")[:255]
+        normalized = description.upper()
+        pluggy_category = tx.get("category")
+
+        # Regra do usuário ganha da categoria da Pluggy: é override explícito
+        # dele sobre a classificação automática.
+        category_id = None
+        for keyword, mapped_id in keyword_map.items():
+            if keyword in normalized:
+                category_id = _category_for_direction(
+                    UUID(mapped_id), tx_type, category_kind_by_id
+                )
+                if category_id is not None:
+                    break
+        if category_id is None:
+            mapped_name = category_name_for(
+                pluggy_category, is_income=(tx_type == TransactionType.INCOME)
+            )
+            if mapped_name:
+                category_id = _category_for_direction(
+                    category_ids_by_name.get(mapped_name), tx_type, category_kind_by_id
+                )
+
+        new_tx = Transaction(
+            user_id=account.user_id,
+            date=tx_date,
+            description=description,
+            amount=Decimal(str(abs(amount_raw))),
+            type=tx_type,
+            source=candidate["source_key"],
+            category_id=category_id,
+            is_transfer=is_transfer(pluggy_category, description),
+            external_category=(pluggy_category or None),
+        )
+        db.add(new_tx)
+        new_transactions.append(new_tx)
+        imported += 1
 
     account.last_sync_at = datetime.now(timezone.utc)
     db.commit()

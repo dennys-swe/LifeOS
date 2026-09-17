@@ -404,3 +404,106 @@ def test_overdue_balance_rollover_is_transfer_not_new_expense():
     assert is_transfer(category, "Multa de atraso") is False
     assert is_transfer(category, "IOF de atraso") is False
     assert is_transfer(category, "Juros de dívida encerrada") is False
+
+
+# ---------------------------------------------------------------------------
+# Dedup entre feeds do mesmo item (issue #32): conta "Múltiplo" (débito+crédito
+# no mesmo plástico) e reemissões do banco fazem a mesma compra aparecer com
+# ids diferentes — dedup por `source=pluggy:{id}` não pega porque o id muda.
+# ---------------------------------------------------------------------------
+
+def _sync_multi(db, acc, accounts: list[tuple[str, list[dict]]]):
+    """Sincroniza várias pluggy accounts do mesmo item numa única chamada.
+
+    `accounts` é uma lista de `(account_type, txs)` — cada item vira uma
+    pluggy account distinta (id gerado), simulando um item que agrega conta
+    corrente + cartão(ões), como o Itaú Múltiplo real do #32.
+    """
+    pluggy_accts = [
+        SimpleNamespace(id=str(uuid4()), type=account_type, name=f"conta-{i}")
+        for i, (account_type, _) in enumerate(accounts)
+    ]
+    txs_by_account_id = {pa.id: txs for pa, (_, txs) in zip(pluggy_accts, accounts)}
+
+    def _transactions_list(account_id, page, page_size):
+        return _raw_page(txs_by_account_id[account_id])
+
+    with (
+        patch("app.services.bank_sync_service.get_api_client", return_value=_ctx()),
+        patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
+    ):
+        mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+            results=pluggy_accts
+        )
+        mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.side_effect = (
+            _transactions_list
+        )
+        return bank_sync_service.sync_account(db, acc)
+
+
+def test_reissued_transaction_in_same_feed_is_deduped(db_session, user):
+    """O Itaú reemite o mesmo evento com um novo id (POSTO CASARAO real do
+    #32): mesmo valor, descrição quase igual, 1 dia de diferença. Sem dedup
+    por similaridade, o extrato duplica a compra."""
+    acc = _account(db_session, user)
+
+    _sync(
+        db_session,
+        acc,
+        [
+            _tx("70596e16", 8.50, "POSTO CASARAO IICRATOBRA", tipo="DEBIT", dia="2026-08-09"),
+            _tx("c138ecd2", 8.50, "POSTO CASARAO IICRATOBRA", tipo="DEBIT", dia="2026-08-09"),
+        ],
+    )
+
+    assert db_session.query(Transaction).count() == 1
+
+
+def test_cross_feed_duplicate_between_checking_and_credit_is_deduped(db_session, user):
+    """A mesma compra do cartão "Múltiplo" aparece no feed da conta corrente
+    (BANK) E no feed do cartão (CREDIT), com formatos de descrição diferentes
+    por feed."""
+    acc = _account(db_session, user)
+
+    _sync_multi(
+        db_session,
+        acc,
+        [
+            ("BANK", [_tx("93e66b22", 208.32, "Compra débito MERCADINHO", tipo="DEBIT", dia="2026-08-08")]),
+            ("CREDIT", [_tx("16829b82", 208.32, "MERCADINHO", tipo="DEBIT", dia="2026-08-09")]),
+        ],
+    )
+
+    assert db_session.query(Transaction).count() == 1
+
+
+def test_different_purchases_same_amount_far_apart_are_not_merged(db_session, user):
+    """Duas compras de valor igual mas fora da janela de 2 dias e com
+    descrição diferente continuam sendo lançamentos distintos."""
+    acc = _account(db_session, user)
+
+    _sync(
+        db_session,
+        acc,
+        [
+            _tx("t1", 50.0, "PADARIA CENTRAL", tipo="DEBIT", dia="2026-08-01"),
+            _tx("t2", 50.0, "FARMACIA POPULAR", tipo="DEBIT", dia="2026-08-20"),
+        ],
+    )
+
+    assert db_session.query(Transaction).count() == 2
+
+
+def test_different_amounts_same_description_are_not_merged(db_session, user):
+    acc = _account(db_session, user)
+
+    _sync(
+        db_session,
+        acc,
+        [
+            _tx("t1", 50.0, "MERCADINHO CENTRAL", tipo="DEBIT", dia="2026-08-08"),
+            _tx("t2", 51.0, "MERCADINHO CENTRAL", tipo="DEBIT", dia="2026-08-08"),
+        ],
+    )
+
+    assert db_session.query(Transaction).count() == 2
