@@ -265,6 +265,34 @@ def test_transfer_rule_marks_matched_transactions_as_transfer(db_session, user):
     assert recebido.is_transfer is True
 
 
+def test_transfer_rule_still_applies_when_category_already_matches(db_session, user):
+    """Achado do /code-review: a Pluggy já pode ter jogado o PIX na mesma
+    categoria da regra (ex: "Outras receitas", o catch-all de receita) antes
+    da regra existir — `is_distinct_from` sozinho não pegava esse caso, e
+    `is_transfer` nunca ligava pra ele."""
+    from app.models.category import CategoryKind
+    from app.models.transaction import TransactionType
+
+    renda = _cat(db_session, user, "Outras receitas", kind=CategoryKind.INCOME)
+    ja_na_categoria = _tx(
+        db_session,
+        user,
+        "Transferência Recebida|NOIVA",
+        tx_type=TransactionType.INCOME,
+        category_id=renda.id,
+    )
+
+    rule = create_rule(
+        db_session,
+        user.id,
+        CategoryRuleCreate(keyword="NOIVA", category_id=renda.id, is_transfer=True),
+    )
+
+    assert apply_rule_to_existing(db_session, user.id, rule) == 1
+    db_session.refresh(ja_na_categoria)
+    assert ja_na_categoria.is_transfer is True
+
+
 def test_transfer_rule_never_turns_off_existing_transfer_flag(db_session, user):
     """A regra só liga is_transfer, nunca desliga — uma transação que a Pluggy
     já marcou como transferência por outro motivo não pode ser "destransferida"

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.category import Category, CategoryKind
@@ -47,14 +47,29 @@ def apply_rule_to_existing(db: Session, user_id: UUID, rule: CategoryRule) -> in
         TransactionType.INCOME if category.kind == CategoryKind.INCOME else TransactionType.EXPENSE
     )
 
+    # Sem `rule.is_transfer`, só interessa quem muda de categoria (como sempre
+    # foi). Com `rule.is_transfer`, também precisa pegar quem já está na
+    # categoria certa mas ainda não está marcado como transferência — senão
+    # uma transação que a Pluggy já tinha jogado em "Outras receitas" (mesma
+    # categoria da regra) nunca seria selecionada, e `is_transfer` nunca
+    # ligaria pra ela (exatamente o caso de uso da divisão de contas).
+    needs_update = (
+        or_(
+            Transaction.category_id.is_distinct_from(rule.category_id),
+            Transaction.is_transfer.is_(False),
+        )
+        if rule.is_transfer
+        # `!=` não pegaria os sem categoria: em SQL, NULL != valor é NULL.
+        else Transaction.category_id.is_distinct_from(rule.category_id)
+    )
+
     matched = (
         db.execute(
             select(Transaction).where(
                 Transaction.user_id == user_id,
                 Transaction.type == wanted_type,
                 Transaction.description.ilike(f"%{rule.keyword}%"),
-                # `!=` não pegaria os sem categoria: em SQL, NULL != valor é NULL.
-                Transaction.category_id.is_distinct_from(rule.category_id),
+                needs_update,
             )
         )
         .scalars()

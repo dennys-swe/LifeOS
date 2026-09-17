@@ -1,6 +1,6 @@
 """category_rules: add is_transfer
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: f9a0b1c2d3e4
 Revises: e5f6a7b8c9d0
 Create Date: 2026-09-17 15:00:00.000000
 
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "a1b2c3d4e5f6"
+revision: str = "f9a0b1c2d3e4"
 down_revision: Union[str, Sequence[str], None] = "e5f6a7b8c9d0"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
