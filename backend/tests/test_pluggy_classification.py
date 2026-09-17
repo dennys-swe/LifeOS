@@ -523,3 +523,60 @@ def test_different_amounts_same_description_are_not_merged(db_session, user):
     )
 
     assert db_session.query(Transaction).count() == 2
+
+
+# ---------------------------------------------------------------------------
+# except Exception largo em bills (issue #10): permanece amplo por contrato
+# (bills é acessório, transações são o dado oficial — falha ali não pode
+# derrubar o sync), mas agora reporta via WARNING em vez de sumir em
+# silêncio. Ver comentário em bank_sync_service.sync_account.
+# ---------------------------------------------------------------------------
+
+
+def _sync_credit(db, acc, *, txs=None, bills_side_effect):
+    pluggy_acct = SimpleNamespace(id=str(uuid4()), type="CREDIT", name="cartão")
+    with (
+        patch("app.services.bank_sync_service.get_api_client", return_value=_ctx()),
+        patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
+    ):
+        mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+            results=[pluggy_acct]
+        )
+        mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = _raw_page(
+            txs or []
+        )
+        mock_sdk.BillApi.return_value.bills_list_without_preload_content.side_effect = (
+            bills_side_effect
+        )
+        return bank_sync_service.sync_account(db, acc)
+
+
+def test_bills_unavailable_degrades_gracefully_on_api_error(db_session, user):
+    """Conector sem suporte a bills (a maioria, fora do Open Finance
+    Regulado) é rotina, não bug — não pode derrubar o sync."""
+    from pluggy_sdk.exceptions import ApiException
+
+    acc = _account(db_session, user)
+
+    result = _sync_credit(db_session, acc, bills_side_effect=ApiException(status=404))
+
+    assert result["imported"] == 0
+
+
+def test_bills_failure_does_not_swallow_transaction_sync(db_session, user):
+    """O ponto real da issue #10 aqui: bills falhar não pode impedir as
+    transações do mesmo cartão de serem importadas — são o dado oficial.
+    Usa uma exceção crua (não ApiException) porque é exatamente isso que o
+    SDK propaga em falha de rede real (o SDK só embrulha SSLError; timeout e
+    connection reset saem como exceção do urllib3/socket, não ApiException)."""
+    acc = _account(db_session, user)
+
+    result = _sync_credit(
+        db_session,
+        acc,
+        txs=[_tx("t1", 100.0, "COMPRA QUALQUER", tipo="DEBIT")],
+        bills_side_effect=ConnectionError("connection reset by peer"),
+    )
+
+    assert result["imported"] == 1
+    assert db_session.query(Transaction).count() == 1
