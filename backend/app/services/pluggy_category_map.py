@@ -119,11 +119,26 @@ _BILL_PAYMENT_DESCRIPTION = re.compile(
     r"pagamento\s+(de\s+)?fatura|fatura\s+paga", re.IGNORECASE
 )
 
+# "Saldo em atraso" é o saldo devedor do rotativo/refinanciamento rolado do
+# mês anterior, não um gasto novo — a compra que o originou já entrou como
+# gasto quando aconteceu. A Pluggy classifica junto com juros/multa/IOF de
+# atraso em "Late payment and overdraft costs" (-> Taxas), e sem distinguir
+# pela descrição essa rolagem conta como Taxas nova todo mês (R$ 456,02 de
+# R$ 501,85 do card "Taxas" em set/2026 era só esse item).
+_OVERDUE_BALANCE_ROLLOVER_DESCRIPTION = re.compile(
+    r"saldo\s+em\s+atraso", re.IGNORECASE
+)
+
 
 def is_transfer(pluggy_category: str | None, description: str | None = None) -> bool:
     if pluggy_category in TRANSFER_CATEGORIES:
         return True
-    return bool(description and _BILL_PAYMENT_DESCRIPTION.search(description))
+    if not description:
+        return False
+    return bool(
+        _BILL_PAYMENT_DESCRIPTION.search(description)
+        or _OVERDUE_BALANCE_ROLLOVER_DESCRIPTION.search(description)
+    )
 
 
 # Ramo Income da Pluggy (`01xxxxxx`). Nunca esteve mapeado: sem destino de
