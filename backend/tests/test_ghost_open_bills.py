@@ -97,7 +97,11 @@ def test_card_that_vanishes_has_its_ghost_bill_and_payable_retired(db_session, u
 
     _sync_two_cards(db_session, acc, ["card-a", "card-b"])
 
-    bills = db_session.execute(select(CreditCardBill).where(CreditCardBill.user_id == user.id)).scalars().all()
+    bills = (
+        db_session.execute(select(CreditCardBill).where(CreditCardBill.user_id == user.id))
+        .scalars()
+        .all()
+    )
     open_bills = [b for b in bills if b.status == CreditCardBillStatus.OPEN]
     assert {b.pluggy_account_id for b in open_bills} == {"card-a", "card-b"}
     payable_ids_before = {b.pluggy_account_id: b.payable_id for b in open_bills}
@@ -109,9 +113,13 @@ def test_card_that_vanishes_has_its_ghost_bill_and_payable_retired(db_session, u
     assert result["retired_open_bills"] == 1
 
     remaining_bills = (
-        db_session.execute(select(CreditCardBill).where(CreditCardBill.user_id == user.id)).scalars().all()
+        db_session.execute(select(CreditCardBill).where(CreditCardBill.user_id == user.id))
+        .scalars()
+        .all()
     )
-    remaining_open = {b.pluggy_account_id for b in remaining_bills if b.status == CreditCardBillStatus.OPEN}
+    remaining_open = {
+        b.pluggy_account_id for b in remaining_bills if b.status == CreditCardBillStatus.OPEN
+    }
     assert remaining_open == {"card-a"}
 
     # o payable do card-a permanece intacto
@@ -172,7 +180,8 @@ def test_empty_accounts_list_does_not_retire_anything(db_session, user):
     remaining = (
         db_session.execute(
             select(CreditCardBill).where(
-                CreditCardBill.user_id == user.id, CreditCardBill.status == CreditCardBillStatus.OPEN
+                CreditCardBill.user_id == user.id,
+                CreditCardBill.status == CreditCardBillStatus.OPEN,
             )
         )
         .scalars()
