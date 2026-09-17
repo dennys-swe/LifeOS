@@ -356,15 +356,18 @@ class TestSyncEndpoint:
 
     @patch("app.api.endpoints.bank_accounts.bank_sync_service.sync_account")
     def test_sync_job_error_sets_error_status(self, mock_sync, client, db_session, user):
+        """`last_sync_error` é exposto na API — não pode vazar `str(exc)` cru
+        (pode conter corpo de resposta da Pluggy ou outro detalhe interno).
+        O detalhe completo vai só para o log/Sentry."""
         acc = _make_account(db_session, user, external_id=str(uuid4()))
-        mock_sync.side_effect = Exception("timeout da Pluggy")
+        mock_sync.side_effect = Exception("timeout da Pluggy, resposta: {api_key: 'segredo'}")
 
         r = client.post(f"/bank-accounts/{acc.id}/sync")
         assert r.status_code == 202
 
         db_session.refresh(acc)
         assert acc.sync_status == BankAccountSyncStatus.ERROR
-        assert "timeout da Pluggy" in acc.last_sync_error
+        assert acc.last_sync_error == "Falha ao sincronizar: Exception"
 
 
 # ---------------------------------------------------------------------------
