@@ -11,7 +11,7 @@ from app.models.credit_card_bill import CreditCardBill
 from app.models.payable import Payable, PayableStatus
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.reconciliation import ReconciliationSuggestionResponse
-from app.services.pluggy_category_map import CREDIT_CARD_PAYMENT
+from app.services.pluggy_category_map import BILL_PAYMENT_DESCRIPTION, CREDIT_CARD_PAYMENT
 
 DATE_TOLERANCE_DAYS = 7
 
@@ -76,8 +76,9 @@ def suggest_pending(db: Session, user_id: UUID) -> List[ReconciliationSuggestion
         .scalars()
         .all()
     )
-    suggestions = suggest_reconciliation(db, user_id, unreconciled)
-    auto_confirmed = auto_reconcile_confident_matches(db, user_id, suggestions)
+    bill_payable_ids = bill_payable_ids_for_user(db, user_id)
+    suggestions = suggest_reconciliation(db, user_id, unreconciled, bill_payable_ids)
+    auto_confirmed = auto_reconcile_confident_matches(db, user_id, suggestions, bill_payable_ids)
     return drop_resolved_payables(suggestions, auto_confirmed)
 
 
@@ -92,10 +93,28 @@ def drop_resolved_payables(
     return [s for s in suggestions if s.payable_id not in resolved_payable_ids]
 
 
+def _is_real_bill_payment(tx: Transaction) -> bool:
+    """A transação é de fato uma quitação de fatura, não só uma cobrança comum
+    do próprio cartão que por coincidência bate o valor da fatura?
+
+    Sem isso, uma fatura cujo total é só uma cobrança isolada (ex: anuidade de
+    cartão cancelado, sem mais nenhuma compra no ciclo) reconciliava consigo
+    mesma: a cobrança e a "quitação" eram a mesma transação, então o payable
+    virava PAID sem nenhum pagamento de verdade ter acontecido — inclusive com
+    cobrança **futura** já datada no vencimento (parcelamento do Itaú/Luiza),
+    o que marcava a fatura como paga antes mesmo do vencimento chegar.
+    """
+    return bool(
+        tx.external_category == CREDIT_CARD_PAYMENT
+        or BILL_PAYMENT_DESCRIPTION.search(tx.description or "")
+    )
+
+
 def suggest_reconciliation(
     db: Session,
     user_id: UUID,
     transactions: List[Transaction],
+    bill_payable_ids: set[UUID] | None = None,
 ) -> List[ReconciliationSuggestionResponse]:
     pending_payables = (
         db.execute(
@@ -106,6 +125,8 @@ def suggest_reconciliation(
         .scalars()
         .all()
     )
+    if bill_payable_ids is None:
+        bill_payable_ids = bill_payable_ids_for_user(db, user_id)
 
     suggestions: List[ReconciliationSuggestionResponse] = []
 
@@ -116,6 +137,12 @@ def suggest_reconciliation(
         tx_amount = Decimal(str(tx.amount))
 
         for payable in pending_payables:
+            # Fatura de cartão: uma cobrança comum do próprio cartão não pode
+            # se passar por pagamento só porque o valor bate (issue relatada
+            # pelo dono — anuidade do Luiza "quitando" a própria fatura).
+            if payable.id in bill_payable_ids and not _is_real_bill_payment(tx):
+                continue
+
             p_amount = Decimal(str(payable.amount))
             exact_amount = tx_amount == p_amount
 
@@ -167,7 +194,7 @@ def _suppress_weaker_amount_matches(
     ]
 
 
-def _bill_payable_ids(db: Session, user_id: UUID) -> set[UUID]:
+def bill_payable_ids_for_user(db: Session, user_id: UUID) -> set[UUID]:
     return set(
         db.execute(
             select(CreditCardBill.payable_id).where(
@@ -183,6 +210,7 @@ def auto_reconcile_confident_matches(
     db: Session,
     user_id: UUID,
     suggestions: List[ReconciliationSuggestionResponse],
+    bill_payable_ids: set[UUID] | None = None,
 ) -> List[UUID]:
     """Confirma automaticamente sugestões com confidence 1.0 quando o match é
     único (nem o payable nem a transação aparecem em mais de uma sugestão
@@ -197,6 +225,7 @@ def auto_reconcile_confident_matches(
 
     confirmed: List[UUID] = []
     confirmed_payable_ids: set[UUID] = set()
+    used_transaction_ids: set[UUID] = set()
     for s in exact:
         if payable_counts[s.payable_id] != 1 or transaction_counts[s.transaction_id] != 1:
             continue
@@ -206,52 +235,88 @@ def auto_reconcile_confident_matches(
             )
             confirmed.append(s.transaction_id)
             confirmed_payable_ids.add(s.payable_id)
+            used_transaction_ids.add(s.transaction_id)
         except ValueError:
             continue
 
-    confirmed += _auto_resolve_bill_payment_echoes(
-        db, user_id, suggestions, already_confirmed=confirmed_payable_ids
+    confirmed += _auto_resolve_bill_payments(
+        db,
+        user_id,
+        suggestions,
+        already_confirmed_payables=confirmed_payable_ids,
+        already_used_transactions=used_transaction_ids,
+        bill_payable_ids=bill_payable_ids,
     )
     return confirmed
 
 
-def _auto_resolve_bill_payment_echoes(
+def _auto_resolve_bill_payments(
     db: Session,
     user_id: UUID,
     suggestions: List[ReconciliationSuggestionResponse],
-    already_confirmed: set[UUID],
+    already_confirmed_payables: set[UUID],
+    already_used_transactions: set[UUID],
+    bill_payable_ids: set[UUID] | None = None,
 ) -> List[UUID]:
-    """Para faturas de cartão, quando há mais de um candidato de valor exato
-    (confidence >= 0.8) e só um deles NÃO é uma descrição-eco genérica
-    (GENERIC_BILL_PAYMENT_ECHOES), confirma esse — ele é o débito real, o
-    outro é só o registro informativo do banco pro mesmo pagamento."""
+    """Para faturas de cartão, a data bater exato não é exigida: todo
+    candidato aqui já passou por `_is_real_bill_payment` em
+    `suggest_reconciliation`, então não é uma cobrança comum coincidindo em
+    valor — é a própria Pluggy/descrição do banco confirmando que aquilo é
+    quitação. Um candidato único já confirma sozinho (esse era o caso que
+    ficava perdido: pagamento real, feito alguns dias depois do vencimento,
+    sem nenhum "eco" pra desambiguar). Mais de um candidato — o débito real e
+    o eco genérico do banco pro mesmo evento (ex: "PAGAMENTO RECEBIDO") —
+    escolhe o que não é eco.
+
+    Antes de confirmar, ainda checa se a transação escolhida não está sendo
+    reaproveitada por outro payable nesta mesma passada (ex: duas faturas
+    que por coincidência têm o mesmo valor) nem já usada pela passada
+    anterior de confidence 1.0 — a mesma transação nunca pode quitar duas
+    faturas.
+    """
     by_payable: dict[UUID, list[ReconciliationSuggestionResponse]] = {}
     for s in suggestions:
-        if s.confidence_score >= 0.8 and s.payable_id not in already_confirmed:
+        if (
+            s.confidence_score >= 0.8
+            and s.payable_id not in already_confirmed_payables
+            and s.transaction_id not in already_used_transactions
+        ):
             by_payable.setdefault(s.payable_id, []).append(s)
 
-    candidates = {pid: group for pid, group in by_payable.items() if len(group) > 1}
-    if not candidates:
+    if not by_payable:
         return []
 
-    bill_payable_ids = _bill_payable_ids(db, user_id)
+    if bill_payable_ids is None:
+        bill_payable_ids = bill_payable_ids_for_user(db, user_id)
 
-    confirmed: List[UUID] = []
-    for payable_id, group in candidates.items():
+    chosen_by_payable: dict[UUID, ReconciliationSuggestionResponse] = {}
+    for payable_id, group in by_payable.items():
         if payable_id not in bill_payable_ids:
             continue
-        specific = [
-            s
-            for s in group
-            if s.transaction_description.strip().upper() not in GENERIC_BILL_PAYMENT_ECHOES
-        ]
-        if len(specific) != 1:
+        if len(group) == 1:
+            chosen_by_payable[payable_id] = group[0]
+        else:
+            specific = [
+                s
+                for s in group
+                if s.transaction_description.strip().upper() not in GENERIC_BILL_PAYMENT_ECHOES
+            ]
+            if len(specific) == 1:
+                chosen_by_payable[payable_id] = specific[0]
+
+    transaction_usage: dict[UUID, int] = {}
+    for s in chosen_by_payable.values():
+        transaction_usage[s.transaction_id] = transaction_usage.get(s.transaction_id, 0) + 1
+
+    confirmed: List[UUID] = []
+    for payable_id, chosen in chosen_by_payable.items():
+        if transaction_usage[chosen.transaction_id] != 1:
             continue
         try:
             confirm_reconciliation(
-                db, user_id, transaction_id=specific[0].transaction_id, payable_id=payable_id
+                db, user_id, transaction_id=chosen.transaction_id, payable_id=payable_id
             )
-            confirmed.append(specific[0].transaction_id)
+            confirmed.append(chosen.transaction_id)
         except ValueError:
             continue
 

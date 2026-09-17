@@ -25,6 +25,7 @@ from app.services.pluggy_category_map import category_name_for, is_transfer
 from app.services.pluggy_client import get_api_client
 from app.services.reconciliation_service import (
     auto_reconcile_confident_matches,
+    bill_payable_ids_for_user,
     drop_resolved_payables,
     suggest_reconciliation,
 )
@@ -479,8 +480,11 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     for tx in new_transactions:
         db.refresh(tx)
 
-    suggestions = suggest_reconciliation(db, account.user_id, new_transactions)
-    auto_confirmed = auto_reconcile_confident_matches(db, account.user_id, suggestions)
+    bill_payable_ids = bill_payable_ids_for_user(db, account.user_id)
+    suggestions = suggest_reconciliation(db, account.user_id, new_transactions, bill_payable_ids)
+    auto_confirmed = auto_reconcile_confident_matches(
+        db, account.user_id, suggestions, bill_payable_ids
+    )
     remaining_suggestions = drop_resolved_payables(suggestions, auto_confirmed)
 
     return {

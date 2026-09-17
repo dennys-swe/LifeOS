@@ -392,3 +392,107 @@ def test_suggest_pending_auto_resolves_old_bill_payment_echoes(db_session, user)
     db_session.refresh(p)
     assert p.status == PayableStatus.PAID
     assert p.transaction_id == real_tx.id
+
+
+def test_own_charge_does_not_reconcile_as_bill_payment(db_session, user):
+    """Reportado pelo dono: a anuidade do Luiza (uma cobrança do próprio
+    cartão, não um pagamento) tinha o mesmo valor da fatura e sozinha
+    "quitava" o payable — a fatura virava PAID sem nenhum pagamento de
+    verdade ter acontecido. Uma cobrança comum (sem categoria de quitação e
+    sem descrição de pagamento) nunca pode confirmar uma fatura sozinha,
+    mesmo com valor e data batendo exato."""
+    p = _bill_payable(db_session, user, Decimal("15.99"), date(2026, 9, 10))
+    charge = Transaction(
+        user_id=user.id,
+        date=date(2026, 9, 10),
+        description="ANUIDADE DIFERENCIADA 03/12",
+        amount=Decimal("15.99"),
+        type=TransactionType.EXPENSE,
+        external_category="Credit card fees",
+    )
+    db_session.add(charge)
+    db_session.commit()
+
+    suggestions = suggest_reconciliation(db_session, user.id, [charge])
+    assert suggestions == []
+
+    confirmed = auto_reconcile_confident_matches(db_session, user.id, suggestions)
+    assert confirmed == []
+    db_session.refresh(p)
+    assert p.status == PayableStatus.PENDING
+
+
+def test_future_dated_installment_charge_does_not_prematurely_confirm_bill(db_session, user):
+    """Mesmo bug, mas com o padrão de parcelamento do Itaú/Luiza: a cobrança
+    já vem datada no próprio vencimento futuro. Sem a checagem de "é
+    pagamento de verdade?", isso marcava a fatura como paga antes mesmo do
+    vencimento chegar."""
+    p = _bill_payable(db_session, user, Decimal("15.99"), date(2026, 10, 10))
+    future_charge = Transaction(
+        user_id=user.id,
+        date=date(2026, 10, 10),
+        description="ANUIDADE DIFERENCIADA 04/12",
+        amount=Decimal("15.99"),
+        type=TransactionType.EXPENSE,
+        external_category="Credit card fees",
+    )
+    db_session.add(future_charge)
+    db_session.commit()
+
+    suggestions = suggest_reconciliation(db_session, user.id, [future_charge])
+    assert suggestions == []
+    db_session.refresh(p)
+    assert p.status == PayableStatus.PENDING
+
+
+def test_real_bill_payment_confirms_alone_even_a_few_days_late(db_session, user):
+    """Reportado pelo dono: pagamentos reais do Itaú/Inter, feitos alguns dias
+    depois do vencimento, ficavam só como sugestão manual porque não havia
+    nenhum "eco" pra desambiguar e a data não batia exata. A descrição/categoria
+    de quitação de fatura já é confirmação suficiente, mesmo sozinha."""
+    p = _bill_payable(db_session, user, Decimal("737.72"), date(2026, 9, 10))
+    payment = Transaction(
+        user_id=user.id,
+        date=date(2026, 9, 14),  # 4 dias depois do vencimento
+        description="Pagamento de fatura FATURA PAGA Itaú Click M",
+        amount=Decimal("737.72"),
+        type=TransactionType.EXPENSE,
+        external_category="Credit card payment",
+    )
+    db_session.add(payment)
+    db_session.commit()
+
+    suggestions = suggest_reconciliation(db_session, user.id, [payment])
+    confirmed = auto_reconcile_confident_matches(db_session, user.id, suggestions)
+
+    assert confirmed == [payment.id]
+    db_session.refresh(p)
+    assert p.status == PayableStatus.PAID
+    assert p.transaction_id == payment.id
+
+
+def test_same_transaction_cannot_confirm_two_different_bills(db_session, user):
+    """Achado do /code-review: duas faturas com o mesmo valor por coincidência
+    não podem ser quitadas pela mesma transação — sem essa checagem, um único
+    pagamento marcaria as duas como PAID."""
+    p1 = _bill_payable(db_session, user, Decimal("150.00"), date(2026, 9, 10))
+    p2 = _bill_payable(db_session, user, Decimal("150.00"), date(2026, 9, 12))
+    payment = Transaction(
+        user_id=user.id,
+        date=date(2026, 9, 14),
+        description="Pagamento de fatura",
+        amount=Decimal("150.00"),
+        type=TransactionType.EXPENSE,
+        external_category="Credit card payment",
+    )
+    db_session.add(payment)
+    db_session.commit()
+
+    suggestions = suggest_reconciliation(db_session, user.id, [payment])
+    confirmed = auto_reconcile_confident_matches(db_session, user.id, suggestions)
+
+    assert confirmed == []
+    db_session.refresh(p1)
+    db_session.refresh(p2)
+    assert p1.status == PayableStatus.PENDING
+    assert p2.status == PayableStatus.PENDING
