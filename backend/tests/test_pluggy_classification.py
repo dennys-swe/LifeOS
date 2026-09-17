@@ -388,3 +388,19 @@ def test_bill_payment_is_excluded_from_spending(db_session, user):
     )
 
     assert db_session.query(Transaction).one().is_transfer is True
+
+
+def test_overdue_balance_rollover_is_transfer_not_new_expense():
+    """"Saldo em atraso" é o saldo devedor do rotativo rolado do mês anterior,
+    não um gasto novo — a compra que o originou já entrou como gasto quando
+    aconteceu. A Pluggy classifica junto com juros/multa/IOF de atraso em
+    "Late payment and overdraft costs" (-> Taxas); sem distinguir pela
+    descrição, a rolagem contava como Taxas nova todo mês."""
+    category = "Late payment and overdraft costs"
+    assert is_transfer(category, "Saldo em atraso") is True
+    assert is_transfer(category, "SALDO EM ATRASO") is True
+    # encargos reais continuam contando como Taxas de verdade
+    assert is_transfer(category, "Juros de atraso") is False
+    assert is_transfer(category, "Multa de atraso") is False
+    assert is_transfer(category, "IOF de atraso") is False
+    assert is_transfer(category, "Juros de dívida encerrada") is False
