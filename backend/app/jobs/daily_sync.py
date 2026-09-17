@@ -63,7 +63,7 @@ def run(db: Optional[Session] = None) -> dict:
                 try:
                     bank_sync_service.sync_account(db, account)
                     synced_accounts += 1
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     errors += 1
                     logger.exception(
                         "sync falhou (user=%s account=%s): %s", user.id, account.id, exc
@@ -73,13 +73,13 @@ def run(db: Optional[Session] = None) -> dict:
                 recurring_service.generate_for_month(
                     db, user.id, month=today.month, year=today.year
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors += 1
                 logger.exception("generate_for_month falhou (user=%s): %s", user.id, exc)
 
             try:
                 push_service.send_upcoming_notifications(db, user.id, days=3)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 errors += 1
                 logger.exception("push falhou (user=%s): %s", user.id, exc)
 

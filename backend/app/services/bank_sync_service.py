@@ -93,7 +93,7 @@ def create_account(db: Session, user_id: UUID, payload: BankAccountCreate) -> Ba
     if (not data.get("name") or not data.get("bank_name")) and data.get("external_id"):
         try:
             derived_name, derived_bank = describe_item(UUID(data["external_id"]))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # Nome ruim é bem melhor que falhar a conexão — o usuário pode
             # renomear depois via PATCH.
             logger.warning(
@@ -298,7 +298,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         account_id=pluggy_acct.id
                     )
                     bills_data = json.loads(raw_bills.data).get("results") or []
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     # Bills só existem em conexões Open Finance Regulado — degrada
                     # para lista vazia quando a conexão não as suporta, mas loga:
                     # sem isso não há como distinguir "conector não expõe faturas"
@@ -373,7 +373,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         is not None
                     ):
                         open_bills_synced += 1
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     # Estimativa é acessório: falhar aqui não pode derrubar o
                     # sync de transações e faturas, que são o dado oficial.
                     db.rollback()

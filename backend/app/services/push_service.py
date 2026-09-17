@@ -195,7 +195,7 @@ def send_upcoming_notifications(db: Session, user_id: UUID, days: int = 3) -> in
                 db.delete(sub)
             else:
                 logger.warning("falha ao enviar push (HTTP %s): %s", status, exc)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # Engolir toda exceção em silêncio deixava o push falhar sem deixar
             # rastro: o job retornava 0 enviados e não havia como distinguir
             # "ninguém inscrito" de "chave errada" ou "serviço fora do ar".

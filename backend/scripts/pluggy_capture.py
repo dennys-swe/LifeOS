@@ -61,7 +61,7 @@ def _bills(bill_api: pluggy_sdk.BillApi, account_id: str) -> list[dict]:
     try:
         raw = bill_api.bills_list_without_preload_content(account_id=account_id)
         return json.loads(raw.data).get("results") or []
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"  bills indisponíveis: {type(exc).__name__}: {exc}")
         return []
 

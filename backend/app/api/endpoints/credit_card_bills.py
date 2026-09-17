@@ -86,7 +86,7 @@ def debug_open_bills(
                 pluggy_accounts = (
                     account_api.accounts_list(item_id=account.external_id).results or []
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 out.append({"conexao": account.name, "erro": f"{type(exc).__name__}: {exc}"})
                 continue
 
@@ -103,7 +103,7 @@ def debug_open_bills(
                         ).get("results")
                         or []
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     raw_bills = []
                 bills_by_due = sorted(
                     (b for b in raw_bills if b.get("dueDate")), key=lambda b: b["dueDate"]

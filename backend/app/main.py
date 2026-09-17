@@ -85,7 +85,7 @@ def root():
     try:
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logging.getLogger(__name__).exception("readiness check falhou: banco indisponível")
         raise HTTPException(status_code=503, detail="database unavailable") from exc
     return {"status": "ok"}
