@@ -1,5 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useMountedRef } from "../hooks/useMountedRef";
+import { useRevalidateOnFocus } from "../hooks/useRevalidateOnFocus";
 import { loadFinanceCache, saveFinanceCache } from "../lib/financeCache";
+import { STALE_TTL_MS } from "../lib/staleness";
 import api from "../services/api";
 
 const FinanceContext = createContext(null);
@@ -21,14 +24,14 @@ const FinanceContext = createContext(null);
 // automático do cron, webhook da Pluggy, conciliação feita em outra aba) —
 // só `refresh()` explícito depois de uma mutação local invalidava, então uma
 // aba deixada aberta ficava com dado velho indefinidamente (só saía do ar no
-// logout). `STALE_TTL_MS` marca a partir de quando um dado cacheado é velho
-// o bastante pra merecer revalidação silenciosa (mostra o cache na hora,
-// sem tela de loading, e busca por baixo dos panos) — ao focar a aba de
-// novo ou trocar de mês/ano. Uma entrada de cache de antes desta mudança não
-// tem `fetchedAt` (`?? 0` cai no epoch), então já nasce "velha" e se
-// autocorrige no primeiro foco/troca de mês após o deploy, sem precisar de
-// migração de formato.
-const STALE_TTL_MS = 3 * 60 * 1000;
+// logout). `STALE_TTL_MS` (lib/staleness.js, compartilhado com
+// BankAccountsPage) marca a partir de quando um dado cacheado é velho o
+// bastante pra merecer revalidação silenciosa (mostra o cache na hora, sem
+// tela de loading, e busca por baixo dos panos) — ao focar a aba de novo ou
+// trocar de mês/ano. Uma entrada de cache de antes desta mudança não tem
+// `fetchedAt` (`?? 0` cai no epoch), então já nasce "velha" e se autocorrige
+// no primeiro foco/troca de mês após o deploy, sem precisar de migração de
+// formato.
 
 export function FinanceProvider({ children, month, year }) {
   const cacheRef = useRef(null);
@@ -36,7 +39,7 @@ export function FinanceProvider({ children, month, year }) {
     cacheRef.current = loadFinanceCache();
   }
   const lastRefreshKeyRef = useRef(0);
-  const mountedRef = useRef(true);
+  const mountedRef = useMountedRef();
   // Chave do mês/ano exibido agora — checado no retorno de um fetch antes de
   // aplicar setState, senão uma resposta lenta de um mês antigo (ex: a
   // revalidação silenciosa de foco de aba) pode chegar depois do usuário já
@@ -57,12 +60,6 @@ export function FinanceProvider({ children, month, year }) {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
-
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   // Identidade estável (sem closure sobre month/year/state) — pode entrar em
   // dependência de efeito sem recriar o efeito a cada render, mesma
@@ -117,7 +114,7 @@ export function FinanceProvider({ children, month, year }) {
         setLoading(false);
       }
     }
-  }, []);
+  }, [mountedRef]);
 
   useEffect(() => {
     // refresh() explícito (após criar/editar/pagar algo) é a única coisa que
@@ -147,24 +144,21 @@ export function FinanceProvider({ children, month, year }) {
 
   // Revalida em segundo plano ao voltar pra aba (padrão comum em SaaS: Gmail,
   // Slack) — cobre "deixei aberta e o cron/webhook mudou algo" sem esperar o
-  // usuário mexer em mês/ano ou fazer uma mutação local.
-  useEffect(() => {
-    const revalidateIfStale = () => {
-      if (document.visibilityState !== "visible") return;
+  // usuário mexer em mês/ano ou fazer uma mutação local. Listener + dedup de
+  // visibilitychange/focus disparando juntos moram no hook compartilhado
+  // (também usado por BankAccountsPage, issue #116); `revalidatingKeysRef`
+  // dentro de `fetchFinance` continua sendo uma 2ª camada, pro caso de troca
+  // rápida de mês coincidir com um foco de aba.
+  useRevalidateOnFocus(
+    useCallback(async () => {
       const key = `${month}-${year}`;
       const cached = cacheRef.current.get(key);
       // Sem entrada nenhuma: o efeito de cima já cuida na próxima renderização.
       if (cached && Date.now() - (cached.fetchedAt ?? 0) > STALE_TTL_MS) {
-        fetchFinance(key, month, year, { silent: true });
+        await fetchFinance(key, month, year, { silent: true });
       }
-    };
-    document.addEventListener("visibilitychange", revalidateIfStale);
-    window.addEventListener("focus", revalidateIfStale);
-    return () => {
-      document.removeEventListener("visibilitychange", revalidateIfStale);
-      window.removeEventListener("focus", revalidateIfStale);
-    };
-  }, [month, year, fetchFinance]);
+    }, [month, year, fetchFinance])
+  );
 
   return (
     <FinanceContext.Provider value={{ payables, categories, summary, loading, refresh }}>
