@@ -47,6 +47,8 @@ export default function BankAccountsPage() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [connecting, setConnecting] = useState(false);
   const [msg, setMsg] = useState("");
+  const [cardsByAccount, setCardsByAccount] = useState({});
+  const [togglingCard, setTogglingCard] = useState(null);
   const pluggyRef = useRef(null);
 
   const load = async () => {
@@ -56,8 +58,22 @@ export default function BankAccountsPage() {
         api.get("/bank-accounts").catch(() => ({ data: [] })),
         api.get("/bank-accounts/reconciliation-suggestions").catch(() => ({ data: [] })),
       ]);
-      setAccounts(accRes.data ?? []);
+      const accs = accRes.data ?? [];
+      setAccounts(accs);
       setSuggestions(sugRes.data ?? []);
+
+      // `account_type` da conexão é sempre "checking" (a Pluggy Connect não
+      // diferencia no momento de conectar — quem detecta cartão é o sync,
+      // por pluggy_account, não a conexão como um todo). Por isso busca pra
+      // TODAS as contas em vez de filtrar por account_type: o endpoint só
+      // devolve algo pras que já sincronizaram algum CreditCardBill, então é
+      // barato e inofensivo pras que não têm cartão nenhum.
+      const cardResults = await Promise.all(
+        accs.map((a) => api.get(`/bank-accounts/${a.id}/cards`).catch(() => ({ data: [] })))
+      );
+      const next = {};
+      accs.forEach((a, i) => { next[a.id] = cardResults[i].data ?? []; });
+      setCardsByAccount(next);
     } finally {
       setLoading(false);
     }
@@ -158,6 +174,26 @@ export default function BankAccountsPage() {
     }
   };
 
+  const handleToggleCard = async (accountId, card) => {
+    const key = `${accountId}:${card.pluggy_account_id}`;
+    setTogglingCard(key);
+    try {
+      if (card.ignored) {
+        await api.delete(`/bank-accounts/${accountId}/cards/${card.pluggy_account_id}/ignore`);
+        setMsg(`"${card.label}" voltará a ser sincronizado.`);
+      } else {
+        await api.post(`/bank-accounts/${accountId}/cards/${card.pluggy_account_id}/ignore`);
+        setMsg(`"${card.label}" ignorado — nenhuma cobrança nova será gerada.`);
+      }
+      await load();
+      refresh();
+    } catch {
+      setMsg("Erro ao atualizar o cartão.");
+    } finally {
+      setTogglingCard(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       <ConfirmModal
@@ -218,9 +254,11 @@ export default function BankAccountsPage() {
             accounts.map((acc) => {
               const isSyncing = syncingId === acc.id;
               const isEditing = editingId === acc.id;
+              const cards = cardsByAccount[acc.id] ?? [];
 
               return (
-                <Card key={acc.id} className="p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <Card key={acc.id} className="p-5 flex flex-col gap-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-4 min-w-0 flex-1">
                     <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
                       <IconBank className="h-6 w-6" />
@@ -278,6 +316,47 @@ export default function BankAccountsPage() {
                       Remover
                     </button>
                   </div>
+                </div>
+
+                {cards.length > 0 && (
+                  <div className="flex flex-col gap-2 border-t border-slate-100 pt-3 dark:border-slate-800/40">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                      Cartões desta conexão
+                    </p>
+                    {cards.map((card) => {
+                      const key = `${acc.id}:${card.pluggy_account_id}`;
+                      const isToggling = togglingCard === key;
+                      return (
+                        <div
+                          key={card.pluggy_account_id}
+                          className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-800/40"
+                        >
+                          <span className={`text-xs font-semibold ${card.ignored ? "text-slate-400 line-through dark:text-slate-600" : "text-slate-700 dark:text-slate-200"}`}>
+                            {card.label}
+                            {card.ignored && (
+                              <span className="ml-2 rounded-full border border-slate-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:border-slate-700 dark:text-slate-500">
+                                Ignorado
+                              </span>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={isToggling}
+                            onClick={() => handleToggleCard(acc.id, card)}
+                            title={card.ignored ? "Voltar a sincronizar este cartão" : "Parar de gerar fatura/cobrança deste cartão"}
+                            className={`rounded-lg px-3 py-1 text-[11px] font-bold transition disabled:opacity-50 ${
+                              card.ignored
+                                ? "border border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+                                : "border border-rose-300/60 text-rose-500 hover:bg-rose-50 dark:border-rose-500/30 dark:hover:bg-rose-900/20"
+                            }`}
+                          >
+                            {isToggling ? "..." : card.ignored ? "Reativar" : "Ignorar"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 </Card>
               );
             })

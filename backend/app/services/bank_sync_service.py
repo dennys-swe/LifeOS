@@ -363,8 +363,22 @@ def sync_account(db: Session, account: BankAccount) -> dict:
 
         pluggy_accounts = account_api.accounts_list(item_id=item_id).results or []
         seen_pluggy_account_ids: set[str] = set()
+        # Cartão marcado como ignorado pelo usuário (ex: cancelado no banco,
+        # mas a Pluggy continua devolvendo cobrança de anuidade parcelada) é
+        # tratado como se nunca tivesse vindo na resposta — não entra em
+        # `seen_pluggy_account_ids`, nem fatura nem transação dele são
+        # importadas daqui pra frente. `bill_service.ignore_card` já retira a
+        # fatura OPEN e o payable ligado no momento em que o usuário ignora;
+        # este pulo aqui só garante que nenhum dos dois volta a existir em
+        # sync futuro (não depende de `retire_vanished_open_bills`, que só
+        # roda quando `seen_pluggy_account_ids` não fica vazio).
+        ignored_pluggy_account_ids = bill_service.list_ignored_pluggy_account_ids(
+            db, account.user_id
+        )
 
         for pluggy_acct in pluggy_accounts:
+            if pluggy_acct.id in ignored_pluggy_account_ids:
+                continue
             seen_pluggy_account_ids.add(pluggy_acct.id)
             is_credit = getattr(pluggy_acct, "type", None) == "CREDIT"
             card_name = getattr(pluggy_acct, "marketing_name", None) or getattr(
