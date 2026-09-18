@@ -4,6 +4,7 @@ import ConfirmModal from "../components/ConfirmModal";
 import Card, { CardHeader } from "../components/ui/Card";
 import EmptyState from "../components/ui/EmptyState";
 import { fmt } from "../lib/format";
+import { useFinance } from "../context/FinanceContext";
 
 const PLUGGY_CONNECT_CDN = "https://cdn.pluggy.ai/pluggy-connect/latest/pluggy-connect.js";
 
@@ -35,6 +36,7 @@ function IconRefresh({ className }) {
 }
 
 export default function BankAccountsPage() {
+  const { refresh } = useFinance();
   const [accounts, setAccounts] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
   const [editingId, setEditingId] = useState(null);
@@ -148,6 +150,7 @@ export default function BankAccountsPage() {
       );
       setMsg("Conciliação confirmada!");
       await load();
+      refresh();
     } catch {
       setMsg("Erro ao confirmar conciliação.");
     } finally {
