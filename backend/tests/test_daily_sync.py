@@ -138,7 +138,13 @@ def test_run_skips_account_already_being_synced_elsewhere(db_session, user):
     db_session.add(acc)
     db_session.commit()
 
-    with patch("app.jobs.daily_sync.bank_sync_service.sync_account") as mock_sync:
+    with (
+        patch("app.jobs.daily_sync.bank_sync_service.sync_account") as mock_sync,
+        # `send_upcoming_notifications` exige VAPID_PRIVATE_KEY, que não
+        # existe no CI — mockado pra este teste não depender de env externo,
+        # já que push não é o que está sendo testado aqui.
+        patch("app.jobs.daily_sync.push_service.send_upcoming_notifications"),
+    ):
         result = run(db_session)
 
     mock_sync.assert_not_called()
@@ -204,6 +210,9 @@ def test_run_isolates_a_failed_lock_claim_from_the_rest_of_the_job(db_session, u
             side_effect=_fail_once_then_real,
         ),
         patch("app.jobs.daily_sync.bank_sync_service.run_sync_job", return_value=True) as mock_job,
+        # ver comentário equivalente acima — push não é o que está sendo
+        # testado, e exige VAPID_PRIVATE_KEY (ausente no CI).
+        patch("app.jobs.daily_sync.push_service.send_upcoming_notifications"),
     ):
         result = run(db_session)
 
@@ -260,6 +269,9 @@ def test_run_does_not_lose_an_earlier_successful_claim_when_a_later_one_fails(db
             side_effect=_real_a_fail_b,
         ),
         patch("app.jobs.daily_sync.bank_sync_service.run_sync_job", return_value=True) as mock_job,
+        # ver comentário equivalente acima — push não é o que está sendo
+        # testado, e exige VAPID_PRIVATE_KEY (ausente no CI).
+        patch("app.jobs.daily_sync.push_service.send_upcoming_notifications"),
     ):
         result = run(db_session)
 
