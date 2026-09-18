@@ -6,6 +6,7 @@ import { AuthProvider } from "./context/AuthContext";
 import ProtectedLayout from "./components/ProtectedLayout";
 import PageLoader from "./components/PageLoader";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
+import SlowRequestBanner from "./components/SlowRequestBanner";
 
 // Lazy: cada página só baixa quando a rota é visitada — o bundle inicial não
 // precisa de todas de uma vez (issue #11, bundle único de 765kB).
@@ -46,6 +47,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
+        <SlowRequestBanner />
         <RouteErrorBoundary>
           <Suspense fallback={<PageLoader />}>
             <Routes>
