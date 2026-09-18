@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import api from "../services/api";
 import ConfirmModal from "../components/ConfirmModal";
 import Card, { CardHeader } from "../components/ui/Card";
 import EmptyState from "../components/ui/EmptyState";
 import { fmt } from "../lib/format";
 import { useFinance } from "../context/FinanceContext";
+import { useMountedRef } from "../hooks/useMountedRef";
+import { useRevalidateOnFocus } from "../hooks/useRevalidateOnFocus";
+import { STALE_TTL_MS } from "../lib/staleness";
 
 const PLUGGY_CONNECT_CDN = "https://cdn.pluggy.ai/pluggy-connect/latest/pluggy-connect.js";
 
@@ -50,14 +53,41 @@ export default function BankAccountsPage() {
   const [cardsByAccount, setCardsByAccount] = useState({});
   const [togglingCard, setTogglingCard] = useState(null);
   const pluggyRef = useRef(null);
+  const lastLoadedAtRef = useRef(0);
+  const mountedRef = useMountedRef();
+  // Nº sequencial da chamada a `load()` mais recente — uma revalidação
+  // automática lenta (ex: disparada no foco da aba) que termine DEPOIS de
+  // um load() manual mais novo (ex: pós-"Sincronizar") não pode sobrescrever
+  // a tela com o dado pré-mutação, mais velho. Mesmo cuidado do
+  // `activeKeyRef` do FinanceContext, adaptado pra um fetch sem chave.
+  // Checado em dois pontos (depois de accounts+suggestions, depois de
+  // cards) pra manter a renderização incremental: a lista de contas
+  // continua aparecendo assim que chega, sem esperar os cartões de todas.
+  const requestSeqRef = useRef(0);
+  // Quantas chamadas NÃO-silenciosas estão em andamento agora — o spinner só
+  // desliga quando a ÚLTIMA delas termina, não a primeira (duas ações
+  // manuais quase simultâneas, ex: "Sincronizar" seguido de "Atualizar
+  // Conexões", não podem desligar o spinner uma da outra enquanto a mais
+  // nova ainda está buscando). Não conta chamadas silenciosas de propósito
+  // — elas nunca ligam nem desligam esse spinner.
+  const pendingNonSilentRef = useRef(0);
 
-  const load = async () => {
-    setLoading(true);
+  // Identidade estável (refs/setState são estáveis, sem props/state no
+  // corpo) — pode entrar em array de dependência de outro hook sem recriar
+  // esse hook a cada render.
+  const load = useCallback(async ({ silent = false } = {}) => {
+    const seq = ++requestSeqRef.current;
+    if (!silent) {
+      pendingNonSilentRef.current += 1;
+      setLoading(true);
+    }
     try {
       const [accRes, sugRes] = await Promise.all([
         api.get("/bank-accounts").catch(() => ({ data: [] })),
         api.get("/bank-accounts/reconciliation-suggestions").catch(() => ({ data: [] })),
       ]);
+      if (!mountedRef.current || seq !== requestSeqRef.current) return;
+
       const accs = accRes.data ?? [];
       setAccounts(accs);
       setSuggestions(sugRes.data ?? []);
@@ -71,15 +101,39 @@ export default function BankAccountsPage() {
       const cardResults = await Promise.all(
         accs.map((a) => api.get(`/bank-accounts/${a.id}/cards`).catch(() => ({ data: [] })))
       );
+
+      if (!mountedRef.current || seq !== requestSeqRef.current) return;
+
       const next = {};
       accs.forEach((a, i) => { next[a.id] = cardResults[i].data ?? []; });
       setCardsByAccount(next);
+      lastLoadedAtRef.current = Date.now();
     } finally {
-      setLoading(false);
+      if (!silent) {
+        pendingNonSilentRef.current -= 1;
+        if (mountedRef.current && pendingNonSilentRef.current === 0) setLoading(false);
+      }
     }
-  };
+  }, [mountedRef]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // Revalida em segundo plano ao voltar pra aba (mesmo padrão do
+  // FinanceContext, issue #110) — cobre "deixei esta tela aberta e o
+  // cron/webhook mudou algo" sem esperar um clique manual. `silent: true`
+  // busca por baixo dos panos sem animar/desabilitar o botão "Atualizar
+  // Conexões" (a lista já carregada continua na tela normalmente). O dedup
+  // de visibilitychange+focus disparando juntos mora no hook — não bloqueia
+  // `load()` em si, que outras ações (sync, conectar, editar, etc.)
+  // continuam podendo chamar livremente mesmo com uma revalidação em
+  // andamento.
+  useRevalidateOnFocus(
+    useCallback(async () => {
+      if (Date.now() - lastLoadedAtRef.current > STALE_TTL_MS) {
+        await load({ silent: true });
+      }
+    }, [load])
+  );
 
   const handleConnect = async () => {
     setConnecting(true);
