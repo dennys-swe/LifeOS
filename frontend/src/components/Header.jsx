@@ -37,6 +37,14 @@ function IconLogout({ className }) {
   );
 }
 
+function IconRefresh({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+    </svg>
+  );
+}
+
 function IconSettings({ className }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
@@ -49,7 +57,7 @@ function IconSettings({ className }) {
 export default function Header() {
   const { user, logout } = useAuth();
   const { dark, toggle } = useTheme();
-  const { syncing } = useBankSync({ syncOnMount: true });
+  const { syncing, triggerSync } = useBankSync({ syncOnMount: true });
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
 
@@ -82,6 +90,20 @@ export default function Header() {
               Atualizando…
             </span>
           )}
+
+          {/* Sincronizar tudo (issue #118) — força sync de todas as contas,
+              ignorando staleness (o automático da issue #114 só pega
+              contas "velhas" ao abrir o app). Reaproveita o mesmo
+              useBankSync do selo "Atualizando…" acima. */}
+          <button
+            type="button"
+            onClick={() => triggerSync(true)}
+            disabled={syncing}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200/80 bg-slate-50 text-slate-600 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+            title="Sincronizar todas as contas agora"
+          >
+            <IconRefresh className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+          </button>
 
           {/* Dark mode button */}
           <button
