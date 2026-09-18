@@ -299,8 +299,338 @@ class TestConnectToken:
 
 
 # ---------------------------------------------------------------------------
+# is_stale (issue #114)
+# ---------------------------------------------------------------------------
+
+
+class TestTryStartSync:
+    def test_claims_lock_when_idle(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        assert bank_sync_service.try_start_sync(db_session, acc) is True
+        assert acc.sync_status == BankAccountSyncStatus.SYNCING
+
+    def test_fails_when_already_syncing(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        acc.sync_status = BankAccountSyncStatus.SYNCING
+        acc.sync_started_at = datetime.now(timezone.utc)
+        db_session.add(acc)
+        db_session.commit()
+
+        assert bank_sync_service.try_start_sync(db_session, acc) is False
+
+    def test_two_concurrent_requests_for_the_same_account_only_one_wins(self, db_session, user):
+        """Corrida de verdade com uma segunda sessão contra o mesmo banco
+        (StaticPool, mesmo padrão do teste de corrida do ignore_card):
+        as duas leem sync_status=IDLE antes de qualquer uma escrever — só
+        uma pode vencer o UPDATE atômico."""
+        from sqlalchemy.orm import sessionmaker
+
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+
+        OtherSession = sessionmaker(bind=db_session.get_bind())
+        other_session = OtherSession()
+        try:
+            other_account = other_session.get(BankAccount, acc.id)
+
+            first_won = bank_sync_service.try_start_sync(db_session, acc)
+            second_won = bank_sync_service.try_start_sync(other_session, other_account)
+
+            assert first_won is True
+            assert second_won is False
+        finally:
+            other_session.close()
+
+
+class TestIsStale:
+    def test_never_synced_is_stale(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        assert bank_sync_service.is_stale(acc) is True
+
+    def test_recently_synced_is_not_stale(self, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        acc.last_sync_at = datetime.now(timezone.utc)
+        assert bank_sync_service.is_stale(acc) is False
+
+    def test_error_status_is_stale_even_with_recent_last_sync_at(self, db_session, user):
+        """Achado no code-review: `sync_account` grava `last_sync_at` antes
+        de rodar a conciliação — uma falha depois disso deixa a conta em
+        ERROR com `last_sync_at` fresco. Sem essa checagem, o sync
+        automático (issue #114) ignoraria uma conta visivelmente quebrada
+        pelos 45min inteiros do threshold."""
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        acc.last_sync_at = datetime.now(timezone.utc)
+        acc.sync_status = BankAccountSyncStatus.ERROR
+        assert bank_sync_service.is_stale(acc) is True
+
+    def test_old_sync_is_stale(self, db_session, user):
+        from datetime import timedelta
+
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        acc.last_sync_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        assert bank_sync_service.is_stale(acc) is True
+
+    def test_naive_datetime_is_treated_as_utc(self, db_session, user):
+        """`last_sync_at` gravado sem tzinfo (SQLite não guarda timezone) não
+        pode quebrar a comparação com um datetime aware."""
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        acc.last_sync_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        assert bank_sync_service.is_stale(acc) is False
+
+
+# ---------------------------------------------------------------------------
+# sync-all endpoint (issue #114)
+# ---------------------------------------------------------------------------
+
+
+class TestSyncAllEndpoint:
+    @patch("app.api.endpoints.bank_accounts.bank_sync_service.run_sync_job")
+    def test_only_stale_accounts_are_triggered_by_default(self, mock_job, client, db_session, user):
+        from datetime import timedelta
+
+        fresh = _make_account(db_session, user, external_id=str(uuid4()))
+        fresh.last_sync_at = datetime.now(timezone.utc)
+        stale = _make_account(db_session, user, external_id=str(uuid4()))
+        stale.last_sync_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        db_session.add_all([fresh, stale])
+        db_session.commit()
+
+        r = client.post("/bank-accounts/sync-all")
+        assert r.status_code == 202
+        assert r.json()["triggered"] == [str(stale.id)]
+
+        db_session.refresh(fresh)
+        db_session.refresh(stale)
+        assert fresh.sync_status == BankAccountSyncStatus.IDLE
+        assert stale.sync_status == BankAccountSyncStatus.SYNCING
+
+    @patch("app.api.endpoints.bank_accounts.bank_sync_service.run_sync_job")
+    def test_one_account_failing_to_claim_lock_does_not_abort_the_whole_request(
+        self, mock_job, client, db_session, user
+    ):
+        """Achado no code-review: sem isolamento por conta, uma falha
+        transitória no `try_start_sync` de UMA conta (ex: erro de conexão)
+        devolvia 500 pro request inteiro e nenhuma outra conta do usuário
+        era disparada. Duas contas: a 1ª falha, a 2ª tem que continuar
+        reivindicando o lock normalmente — e o savepoint garante que o claim
+        dela não some junto com o rollback da falha da 1ª."""
+        from datetime import timedelta
+
+        real_try_start_sync = bank_sync_service.try_start_sync
+
+        old = datetime.now(timezone.utc) - timedelta(hours=2)
+        acc_ok = _make_account(db_session, user, external_id=str(uuid4()))
+        acc_ok.last_sync_at = old
+        acc_fail = _make_account(db_session, user, external_id=str(uuid4()))
+        acc_fail.last_sync_at = old
+        db_session.add_all([acc_ok, acc_fail])
+        db_session.commit()
+
+        def _fail_for_one_account(db, account, **kwargs):
+            if account.id == acc_fail.id:
+                raise Exception("erro transitório de conexão")
+            return real_try_start_sync(db, account, **kwargs)
+
+        with patch(
+            "app.api.endpoints.bank_accounts.bank_sync_service.try_start_sync",
+            side_effect=_fail_for_one_account,
+        ):
+            r = client.post("/bank-accounts/sync-all")
+
+        assert r.status_code == 202
+        assert r.json()["triggered"] == [str(acc_ok.id)]
+
+        db_session.refresh(acc_ok)
+        db_session.refresh(acc_fail)
+        assert acc_ok.sync_status == BankAccountSyncStatus.SYNCING
+        assert acc_fail.sync_status == BankAccountSyncStatus.IDLE
+
+    @patch("app.api.endpoints.bank_accounts.bank_sync_service.run_sync_job")
+    def test_multiple_stale_accounts_all_triggered_without_extra_selects(
+        self, mock_job, client, db_session, user
+    ):
+        """Achado no code-review: `try_start_sync` comitava a cada conta do
+        loop, e a sessão padrão expira TODOS os objetos já carregados a cada
+        commit (`expire_on_commit`) — a 2ª conta em diante forçava um SELECT
+        implícito extra só pra reler atributos que não mudaram. Commit
+        deferido pro final do loop (`commit=False`) elimina isso: só 1
+        SELECT (a listagem inicial) pro loop inteiro, não importa quantas
+        contas sejam disparadas."""
+        from datetime import timedelta
+
+        from sqlalchemy import event
+
+        old = datetime.now(timezone.utc) - timedelta(hours=2)
+        acc1 = _make_account(db_session, user, external_id=str(uuid4()))
+        acc1.last_sync_at = old
+        acc2 = _make_account(db_session, user, external_id=str(uuid4()))
+        acc2.last_sync_at = old
+        db_session.add_all([acc1, acc2])
+        db_session.commit()
+
+        selects = []
+        engine = db_session.get_bind()
+
+        def _capture(conn, cursor, statement, parameters, context, executemany):
+            if statement.strip().upper().startswith("SELECT") and "bank_accounts" in statement:
+                selects.append(statement)
+
+        event.listen(engine, "before_cursor_execute", _capture)
+        try:
+            r = client.post("/bank-accounts/sync-all")
+        finally:
+            event.remove(engine, "before_cursor_execute", _capture)
+
+        assert r.status_code == 202
+        assert set(r.json()["triggered"]) == {str(acc1.id), str(acc2.id)}
+        # 1 SELECT em bank_accounts (a listagem inicial) — sem `commit=False`,
+        # cada conta commitada expiraria a outra e forçaria mais 1 SELECT por
+        # conta seguinte só pra reler atributos que não mudaram.
+        assert len(selects) == 1, f"esperava 1 SELECT em bank_accounts, vieram {len(selects)}"
+
+    def test_sync_all_runs_multiple_accounts_concurrently(self, client, db_session, user):
+        """Achado no code-review: agendar um `background_tasks.add_task` por
+        conta parece paralelo, mas o Starlette roda `BackgroundTasks` em
+        sequência — quem tem várias contas ficaria vendo "Atualizando…" pela
+        SOMA da duração de cada sync. `run_sync_jobs_concurrently` despacha
+        todas numa `asyncio.gather`, cada uma na sua thread de verdade."""
+        import time
+        from datetime import timedelta
+
+        old = datetime.now(timezone.utc) - timedelta(hours=2)
+        acc1 = _make_account(db_session, user, external_id=str(uuid4()))
+        acc1.last_sync_at = old
+        acc2 = _make_account(db_session, user, external_id=str(uuid4()))
+        acc2.last_sync_at = old
+        db_session.add_all([acc1, acc2])
+        db_session.commit()
+
+        def _slow_sync(account_id, user_id):
+            time.sleep(0.2)
+
+        with patch(
+            "app.api.endpoints.bank_accounts.bank_sync_service.run_sync_job",
+            side_effect=_slow_sync,
+        ):
+            start = time.monotonic()
+            r = client.post("/bank-accounts/sync-all")
+            elapsed = time.monotonic() - start
+
+        assert r.status_code == 202
+        assert len(r.json()["triggered"]) == 2
+        # Sequencial seria ~0.4s (2 × 0.2s); em paralelo fica perto de 0.2s.
+        assert elapsed < 0.35, f"esperava rodar em paralelo (~0.2s), levou {elapsed:.2f}s"
+
+    def test_run_sync_jobs_concurrently_caps_max_simultaneous_syncs(self):
+        """Achado no code-review: sem limite, um usuário com muitas contas
+        conectadas saturaria sozinho o pool de conexões do processo inteiro
+        (cada `run_sync_job` segura uma sessão pela duração toda do sync).
+        12 contas, teto de 5 (`_MAX_CONCURRENT_SYNCS`) — o pico observado de
+        syncs simultâneos nunca pode passar disso."""
+        import asyncio
+        import threading
+        import time
+
+        from app.services.bank_sync_service import run_sync_jobs_concurrently
+
+        lock = threading.Lock()
+        active = {"n": 0}
+        peak = {"n": 0}
+
+        def _tracked_sync(account_id, user_id):
+            with lock:
+                active["n"] += 1
+                peak["n"] = max(peak["n"], active["n"])
+            time.sleep(0.05)
+            with lock:
+                active["n"] -= 1
+
+        pairs = [(uuid4(), uuid4()) for _ in range(12)]
+
+        with patch("app.services.bank_sync_service.run_sync_job", side_effect=_tracked_sync):
+            asyncio.run(run_sync_jobs_concurrently(pairs))
+
+        assert peak["n"] <= 5
+        assert peak["n"] > 1  # rodou de verdade em paralelo, não sequencial
+
+    @patch("app.api.endpoints.bank_accounts.bank_sync_service.run_sync_job")
+    def test_force_triggers_even_fresh_accounts(self, mock_job, client, db_session, user):
+        fresh = _make_account(db_session, user, external_id=str(uuid4()))
+        fresh.last_sync_at = datetime.now(timezone.utc)
+        db_session.add(fresh)
+        db_session.commit()
+
+        r = client.post("/bank-accounts/sync-all", params={"force": True})
+        assert r.status_code == 202
+        assert r.json()["triggered"] == [str(fresh.id)]
+
+    @patch("app.api.endpoints.bank_accounts.bank_sync_service.run_sync_job")
+    def test_skips_account_without_external_id(self, mock_job, client, db_session, user):
+        _make_account(db_session, user, external_id=None)
+        r = client.post("/bank-accounts/sync-all", params={"force": True})
+        assert r.status_code == 202
+        assert r.json()["triggered"] == []
+        mock_job.assert_not_called()
+
+    @patch("app.api.endpoints.bank_accounts.bank_sync_service.run_sync_job")
+    def test_skips_account_already_syncing(self, mock_job, client, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        acc.sync_status = BankAccountSyncStatus.SYNCING
+        acc.sync_started_at = datetime.now(timezone.utc)
+        db_session.add(acc)
+        db_session.commit()
+
+        r = client.post("/bank-accounts/sync-all", params={"force": True})
+        assert r.status_code == 202
+        assert r.json()["triggered"] == []
+        mock_job.assert_not_called()
+
+    def test_no_accounts_returns_empty_list(self, client):
+        r = client.post("/bank-accounts/sync-all")
+        assert r.status_code == 202
+        assert r.json()["triggered"] == []
+
+
+# ---------------------------------------------------------------------------
 # sync endpoint
 # ---------------------------------------------------------------------------
+
+
+class TestRunSyncJobReturnValue:
+    """`daily_sync.run` (issue #114) reusa `run_sync_job` em vez de
+    reimplementar a transição SYNCING → IDLE/ERROR, e conta
+    synced_accounts/errors a partir do que ele devolve."""
+
+    @patch("app.services.bank_sync_service.sync_account")
+    def test_returns_true_on_success(self, mock_sync, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+        mock_sync.return_value = {}
+
+        assert bank_sync_service.run_sync_job(acc.id, user.id) is True
+        db_session.refresh(acc)
+        assert acc.sync_status == BankAccountSyncStatus.IDLE
+
+    @patch("app.services.bank_sync_service.sync_account", side_effect=Exception("boom"))
+    def test_returns_false_on_failure(self, mock_sync, db_session, user):
+        acc = _make_account(db_session, user, external_id=str(uuid4()))
+
+        assert bank_sync_service.run_sync_job(acc.id, user.id) is False
+        db_session.refresh(acc)
+        assert acc.sync_status == BankAccountSyncStatus.ERROR
+
+    def test_returns_false_for_nonexistent_account(self, db_session, user):
+        assert bank_sync_service.run_sync_job(uuid4(), user.id) is False
+
+    @patch(
+        "app.services.bank_sync_service.get_account",
+        side_effect=Exception("erro transitório de conexão"),
+    )
+    def test_never_raises_even_when_get_account_fails(self, mock_get, db_session, user):
+        """Achado no code-review: `get_account` ficava FORA do try/except
+        interno — uma falha bem aqui escapava da função inteira, quebrando a
+        garantia (documentada no docstring) de que `run_sync_job` nunca deixa
+        uma exceção vazar. `daily_sync.run`/`run_sync_jobs_concurrently`
+        dependem disso pra isolar falha por conta."""
+        assert bank_sync_service.run_sync_job(uuid4(), user.id) is False
 
 
 class TestSyncEndpoint:

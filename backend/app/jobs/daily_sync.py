@@ -59,45 +59,125 @@ def run(db: Optional[Session] = None) -> dict:
                 .all()
             )
 
-            # Os três try/except abaixo são amplos de propósito: o job roda
-            # pra todos os usuários numa só execução, então cada um isola sua
-            # etapa — a falha de UM usuário (ou de UMA conta, ou só do push)
+            # Os try/except abaixo são amplos de propósito: o job roda pra
+            # todos os usuários numa só execução, então cada etapa isola sua
+            # falha — a falha de UMA conta (ou de UM usuário, ou só do push)
             # não pode derrubar o processamento de todo o resto. `errors`
             # conta quantas vezes isso aconteceu e `.exception` garante que
             # nada fica sem rastro no log/Sentry.
+
+            # Fase 1: reivindica o lock de cada conta sem commitar uma a uma
+            # (commit=False) — commitar a cada conta expiraria (via
+            # expire_on_commit da sessão) as outras contas e o `user` já
+            # carregados neste laço, forçando um SELECT implícito extra por
+            # conta seguinte só pra reler atributos que não mudaram (mesmo
+            # cuidado de `sync_all_bank_accounts`, que tem até teste contando
+            # queries pra isso).
+            # Capturado antes do commit do lote abaixo: acessar `.id` num
+            # objeto expirado por `expire_on_commit` dispara um SELECT de
+            # reload por atributo, mesmo pra só ler a primary key.
+            user_id = user.id
+            claimed_pairs: list[tuple] = []
             for account in accounts:
                 try:
-                    bank_sync_service.sync_account(db, account)
-                    synced_accounts += 1
+                    # savepoint (não a transação inteira): se ESTA conta
+                    # falhar ao reivindicar o lock, só o savepoint dela
+                    # desfaz — sem isso, um `db.rollback()` aqui apagava
+                    # também o UPDATE (ainda não commitado) de contas
+                    # anteriores deste mesmo usuário que já tinham ganhado o
+                    # lock com sucesso neste laço (achado no code-review).
+                    with db.begin_nested():
+                        # `try_start_sync` (issue #114) evita a mesma corrida
+                        # que já existia entre este cron e um sync
+                        # manual/automático da mesma conta: sem reivindicar o
+                        # lock aqui, os dois podiam sincronizar ao mesmo
+                        # tempo, colidir em uq_transactions_user_id_source, e
+                        # o `run_sync_job` do lado do usuário marcava
+                        # ERROR/"Falha ao sincronizar" numa conta que na
+                        # verdade o cron sincronizou com sucesso. Perder a
+                        # corrida aqui não é erro — só significa que outra
+                        # sync já está cuidando desta conta agora; o cron de
+                        # amanhã (ou o próximo sync automático por
+                        # staleness) cobre o resto.
+                        won = bank_sync_service.try_start_sync(db, account, commit=False)
                 except Exception as exc:
-                    # Sem o rollback, um commit que falha (ex: IntegrityError
-                    # de uq_transactions_user_id_source — issue #8 — numa
-                    # corrida entre este cron e um sync manual da mesma
-                    # conta) deixa a sessão abortada pro resto do laço: toda
-                    # query seguinte, de qualquer usuário, falharia com
-                    # PendingRollbackError. `db` é compartilhado pela
-                    # execução inteira do job, não por usuário/conta.
-                    db.rollback()
+                    # Uma falha de verdade aqui (ex: erro transitório de
+                    # conexão no UPDATE) não pode propagar pra fora dos dois
+                    # `for` e abortar TODO o resto do job (outras contas,
+                    # outros usuários) — isolada igual as outras etapas.
                     errors += 1
                     logger.exception(
-                        "sync falhou (user=%s account=%s): %s", user.id, account.id, exc
+                        "falha ao reivindicar lock de sync (user=%s account=%s): %s",
+                        user.id,
+                        account.id,
+                        exc,
+                    )
+                    continue
+                if won:
+                    claimed_pairs.append((account.id, user_id))
+                else:
+                    logger.info(
+                        "sync pulado (já em andamento): user=%s account=%s", user_id, account.id
                     )
 
             try:
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                errors += 1
+                logger.exception(
+                    "falha ao commitar lote de locks de sync (user=%s): %s", user_id, exc
+                )
+                # Nada do lote persistiu de verdade — rodar `run_sync_job`
+                # pra essas contas agora seria fazer o sync sem o lock
+                # realmente gravado no banco. Mais seguro pular a fase 2
+                # deste usuário; o próximo sync (staleness/foco/manual) tenta
+                # de novo pra cada conta.
+                claimed_pairs = []
+
+            # Fase 2: roda cada conta reivindicada. Chama `run_sync_job` (a
+            # mesma função que o sync manual e o automático usam) em vez de
+            # reimplementar a transição SYNCING → IDLE/ERROR aqui — evita as
+            # duas cópias divergirem com o tempo. Abre sua própria sessão
+            # (isolada de `db`, compartilhado pelo job inteiro), então uma
+            # falha de commit dentro dela nunca deixa `db` numa transação
+            # abortada pro resto do laço. Itera sobre os ids capturados acima
+            # (não sobre os objetos `account`/`user`, expirados pelo commit).
+            # `run_sync_job` já nunca deixa uma exceção escapar, mas o
+            # try/except aqui é defesa em profundidade — a mesma garantia de
+            # isolamento por conta que toda outra etapa deste laço tem.
+            for account_id, uid in claimed_pairs:
+                try:
+                    success = bank_sync_service.run_sync_job(account_id, uid)
+                except Exception as exc:
+                    errors += 1
+                    logger.exception(
+                        "run_sync_job falhou de forma inesperada (account=%s user=%s): %s",
+                        account_id,
+                        uid,
+                        exc,
+                    )
+                    continue
+                if success:
+                    synced_accounts += 1
+                else:
+                    errors += 1
+
+            try:
                 recurring_service.generate_for_month(
-                    db, user.id, month=today.month, year=today.year
+                    db, user_id, month=today.month, year=today.year
                 )
             except Exception as exc:
                 db.rollback()
                 errors += 1
-                logger.exception("generate_for_month falhou (user=%s): %s", user.id, exc)
+                logger.exception("generate_for_month falhou (user=%s): %s", user_id, exc)
 
             try:
-                push_service.send_upcoming_notifications(db, user.id, days=3)
+                push_service.send_upcoming_notifications(db, user_id, days=3)
             except Exception as exc:
                 db.rollback()
                 errors += 1
-                logger.exception("push falhou (user=%s): %s", user.id, exc)
+                logger.exception("push falhou (user=%s): %s", user_id, exc)
 
     finally:
         if owns_session:

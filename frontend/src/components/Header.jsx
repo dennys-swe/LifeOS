@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import { useBankSync } from "../hooks/useBankSync";
 import EditProfileModal from "./EditProfileModal";
 
 function IconSun({ className }) {
@@ -48,6 +49,7 @@ function IconSettings({ className }) {
 export default function Header() {
   const { user, logout } = useAuth();
   const { dark, toggle } = useTheme();
+  const { syncing } = useBankSync({ syncOnMount: true });
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
 
@@ -74,6 +76,13 @@ export default function Header() {
         </div>
 
         <div className="flex items-center gap-3 ml-auto">
+          {syncing && (
+            <span className="hidden items-center gap-1.5 rounded-full border border-slate-200/80 bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-500 sm:inline-flex dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+              Atualizando…
+            </span>
+          )}
+
           {/* Dark mode button */}
           <button
             type="button"
