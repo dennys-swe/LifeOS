@@ -13,7 +13,7 @@ from app.models.bank_account import BankAccountSyncStatus
 from app.models.user import User
 from app.schemas.bank_account import BankAccountCreate, BankAccountResponse, BankAccountUpdate
 from app.schemas.reconciliation import ReconciliationSuggestionResponse
-from app.services import bank_sync_service
+from app.services import bank_sync_service, bill_service
 from app.services.reconciliation_service import suggest_pending
 
 router = APIRouter(prefix="/bank-accounts", tags=["Bank Accounts"])
@@ -25,6 +25,12 @@ class ConnectTokenResponse(BaseModel):
 
 class SyncStartedResponse(BaseModel):
     sync_status: BankAccountSyncStatus
+
+
+class CardResponse(BaseModel):
+    pluggy_account_id: str
+    label: str
+    ignored: bool
 
 
 @router.post("/connect-token", response_model=ConnectTokenResponse)
@@ -112,3 +118,50 @@ def sync_bank_account(
     bank_sync_service.start_sync(db, account)
     background_tasks.add_task(bank_sync_service.run_sync_job, account.id, user.id)
     return SyncStartedResponse(sync_status=account.sync_status)
+
+
+@router.get("/{account_id}/cards", response_model=List[CardResponse])
+def list_account_cards(
+    account_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user),
+):
+    account = bank_sync_service.get_account(db, user.id, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    return bill_service.list_cards(db, user.id, account_id)
+
+
+@router.post(
+    "/{account_id}/cards/{pluggy_account_id}/ignore", status_code=status.HTTP_204_NO_CONTENT
+)
+def ignore_account_card(
+    account_id: UUID,
+    pluggy_account_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user),
+):
+    account = bank_sync_service.get_account(db, user.id, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    try:
+        bill_service.ignore_card(db, user.id, account_id, pluggy_account_id)
+    except bill_service.CardNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Card not found on this account") from exc
+    return None
+
+
+@router.delete(
+    "/{account_id}/cards/{pluggy_account_id}/ignore", status_code=status.HTTP_204_NO_CONTENT
+)
+def unignore_account_card(
+    account_id: UUID,
+    pluggy_account_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user),
+):
+    account = bank_sync_service.get_account(db, user.id, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    bill_service.unignore_card(db, user.id, account_id, pluggy_account_id)
+    return None

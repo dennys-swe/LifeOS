@@ -7,10 +7,12 @@ from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.bank_account import BankAccount
 from app.models.credit_card_bill import CreditCardBill, CreditCardBillStatus
+from app.models.ignored_card import IgnoredCard
 from app.models.payable import Payable, PayableStatus
 from app.services import open_bill_service
 
@@ -345,6 +347,18 @@ def upsert_open_bill(
 _RETIRE_GRACE_PERIOD = timedelta(days=2)
 
 
+def _retire_open_bill(db: Session, bill: CreditCardBill) -> None:
+    """Apaga a fatura OPEN e, se ainda PENDING, o payable ligado a ela — um
+    já PAID nunca é tocado. Compartilhado por `retire_vanished_open_bills`
+    (cartão sumido, com carência) e `ignore_card` (decisão explícita do
+    usuário, sem carência) pra não duplicar a mesma invariante."""
+    if bill.payable_id is not None:
+        payable = db.get(Payable, bill.payable_id)
+        if payable is not None and payable.status == PayableStatus.PENDING:
+            db.delete(payable)
+    db.delete(bill)
+
+
 def retire_vanished_open_bills(
     db: Session,
     user_id: UUID,
@@ -390,17 +404,152 @@ def retire_vanished_open_bills(
             # sumiu só nesta passada — pode ser um glitch, dá mais uma chance
             continue
 
-        if bill.payable_id is not None:
-            payable = db.get(Payable, bill.payable_id)
-            if payable is not None and payable.status == PayableStatus.PENDING:
-                db.delete(payable)
-        db.delete(bill)
+        _retire_open_bill(db, bill)
         retired += 1
 
     if retired:
         db.commit()
 
     return retired
+
+
+def list_ignored_pluggy_account_ids(db: Session, user_id: UUID) -> set[str]:
+    """Usado por `bank_sync_service.sync_account` pra pular esses cartões
+    completamente, como se a Pluggy nunca os tivesse devolvido."""
+    return set(
+        db.execute(select(IgnoredCard.pluggy_account_id).where(IgnoredCard.user_id == user_id))
+        .scalars()
+        .all()
+    )
+
+
+def list_cards(db: Session, user_id: UUID, bank_account_id: UUID) -> List[dict]:
+    """Um item por `pluggy_account_id` distinto já visto nesta conexão,
+    pra tela poder oferecer "ignorar" por cartão (a conexão pode agrupar
+    vários, ex: MeuPluggy)."""
+    bills = (
+        db.execute(
+            select(CreditCardBill)
+            .where(
+                CreditCardBill.user_id == user_id,
+                CreditCardBill.bank_account_id == bank_account_id,
+            )
+            .order_by(CreditCardBill.due_date.desc())
+        )
+        .scalars()
+        .all()
+    )
+    ignored_ids = list_ignored_pluggy_account_ids(db, user_id)
+
+    by_card: dict[str, CreditCardBill] = {}
+    for bill in bills:
+        # já ordenado por due_date desc — a primeira ocorrência é a mais
+        # recente, então card_name/custom_card_name refletem o apelido atual.
+        by_card.setdefault(bill.pluggy_account_id, bill)
+
+    return [
+        {
+            "pluggy_account_id": pluggy_account_id,
+            "label": bill.custom_card_name or bill.card_name or pluggy_account_id,
+            "ignored": pluggy_account_id in ignored_ids,
+        }
+        for pluggy_account_id, bill in by_card.items()
+    ]
+
+
+class CardNotFoundError(Exception):
+    """`pluggy_account_id` nunca apareceu em nenhum `CreditCardBill` desta
+    conexão — não dá pra confirmar que o cartão pertence a este usuário nem
+    a este `bank_account_id` (a tela só oferece "Ignorar" pra cartão que já
+    veio de `list_cards`, então isso só acontece com uma chamada de API
+    manual/forjada)."""
+
+
+def ignore_card(db: Session, user_id: UUID, bank_account_id: UUID, pluggy_account_id: str) -> None:
+    """Marca o cartão como ignorado e retira na hora a fatura OPEN (ciclo em
+    aberto reconstruído) e o payable PENDING ligado a ela — igual ao que
+    `retire_vanished_open_bills` faz pra cartão sumido, mas sem esperar a
+    carência de 2 dias: aqui é decisão explícita do usuário, não pode ser um
+    glitch transitório da Pluggy. Fatura CLOSED (histórico oficial) nunca é
+    tocada, pago ou não — mesma regra de sempre.
+
+    Ignorar para de sincronizar o cartão por completo (fatura E transações
+    novas) — é para cartão realmente cancelado/fora de uso, cuja Pluggy
+    ainda devolve cobrança de anuidade parcelada. Se o cartão continuar em
+    uso de verdade, ignorá-lo também esconde as compras novas do extrato.
+    """
+    latest = (
+        db.execute(
+            select(CreditCardBill)
+            .where(
+                CreditCardBill.user_id == user_id,
+                CreditCardBill.bank_account_id == bank_account_id,
+                CreditCardBill.pluggy_account_id == pluggy_account_id,
+            )
+            .order_by(CreditCardBill.due_date.desc())
+        )
+        .scalars()
+        .first()
+    )
+    if latest is None:
+        raise CardNotFoundError(pluggy_account_id)
+
+    existing = db.execute(
+        select(IgnoredCard).where(
+            IgnoredCard.user_id == user_id, IgnoredCard.pluggy_account_id == pluggy_account_id
+        )
+    ).scalar_one_or_none()
+
+    if existing is None:
+        db.add(
+            IgnoredCard(
+                user_id=user_id,
+                bank_account_id=bank_account_id,
+                pluggy_account_id=pluggy_account_id,
+                card_name=latest.custom_card_name or latest.card_name,
+            )
+        )
+        try:
+            db.flush()
+        except IntegrityError:
+            # Corrida: duas requisições quase simultâneas (duplo clique, duas
+            # abas) passaram pelo SELECT acima antes de qualquer uma commitar.
+            # A constraint única já garante que só uma linha existe — a perda
+            # da corrida é um no-op, não um erro pro usuário.
+            db.rollback()
+
+    open_bill = db.execute(
+        select(CreditCardBill).where(
+            CreditCardBill.user_id == user_id,
+            CreditCardBill.pluggy_account_id == pluggy_account_id,
+            CreditCardBill.status == CreditCardBillStatus.OPEN,
+        )
+    ).scalar_one_or_none()
+    if open_bill is not None:
+        _retire_open_bill(db, open_bill)
+
+    db.commit()
+
+
+def unignore_card(
+    db: Session, user_id: UUID, bank_account_id: UUID, pluggy_account_id: str
+) -> None:
+    """Volta o cartão a ser sincronizado normalmente no próximo sync.
+
+    Escopado também por `bank_account_id` (não só `user_id`) pra não deixar
+    um usuário com duas conexões reativar o cartão de uma passando o id da
+    outra — mesmo cuidado de `ignore_card`.
+    """
+    existing = db.execute(
+        select(IgnoredCard).where(
+            IgnoredCard.user_id == user_id,
+            IgnoredCard.bank_account_id == bank_account_id,
+            IgnoredCard.pluggy_account_id == pluggy_account_id,
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        db.delete(existing)
+        db.commit()
 
 
 def update_bill_customization(
@@ -462,6 +611,17 @@ def _sync_payable(
         if not is_in_payable_window(bill.due_date, today):
             return
 
+        # Fatura FECHADA (valor oficial e definitivo do banco) em R$0 — ex:
+        # anuidade estornada no próprio mês (caso real do cartão Luiza) —
+        # não é uma obrigação: não existe transação de R$0 pra conciliar, e
+        # o valor não muda mais depois de fechado, então o payable ficaria
+        # PENDING pra sempre. Fatura OPEN em R$0 é diferente e continua
+        # gerando payable normalmente: o ciclo já abriu e a obrigação existe
+        # desde então, mesmo antes da primeira compra (o valor é atualizado
+        # a cada sync enquanto o payable estiver PENDING).
+        if bill.status == CreditCardBillStatus.CLOSED and bill.total_amount <= 0:
+            return
+
         payable = Payable(
             user_id=bill.user_id,
             title=title,
@@ -479,13 +639,26 @@ def _sync_payable(
     if payable is None:
         return
 
+    if payable.status == PayableStatus.PENDING:
+        # Mesmo caso do R$0 na criação, só que chegando pelo caminho OPEN → CLOSED:
+        # o ciclo abriu com valor (gerou payable), e fechou oficialmente em R$0 (ex:
+        # anuidade estornada dentro do próprio ciclo). Sem isso, `payable.amount`
+        # seria zerado abaixo e ficaria PENDING pra sempre — não existe transação de
+        # R$0 pra conciliar. Remove o payable e desvincula: se um sync futuro trouxer
+        # valor > 0 de novo, a criação acima cuida (payable_id volta a None).
+        if bill.status == CreditCardBillStatus.CLOSED and bill.total_amount <= 0:
+            db.delete(payable)
+            bill.payable_id = None
+            db.add(bill)
+            return
+
+        payable.amount = bill.total_amount
+        payable.due_date = bill.due_date
+
     # O título é só rótulo, então é corrigido mesmo em fatura já paga: payables
     # criados antes de `card_name` existir ficaram todos como "Fatura {nome da
     # conexão}", e com o conector MeuPluggy isso deixa dois cartões do mesmo mês
     # com título idêntico e indistinguível. Valor e vencimento, não — são fatos
     # de uma fatura já liquidada e não devem ser reescritos.
     payable.title = title
-    if payable.status == PayableStatus.PENDING:
-        payable.amount = bill.total_amount
-        payable.due_date = bill.due_date
     db.add(payable)

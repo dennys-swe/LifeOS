@@ -158,6 +158,91 @@ def test_upsert_bill_creates_payable(db_session, user):
     assert "Cartão Nubank" in payable.title
 
 
+def test_upsert_bill_with_zero_amount_does_not_generate_payable(db_session, user):
+    """Fatura fechada em R$0 (ex: anuidade estornada no mesmo mês, issue real
+    do cartão Luiza) não é uma obrigação — não existe transação de R$0 pra
+    conciliar, então o payable ficaria PENDING pra sempre."""
+    acc = _make_account(db_session, user)
+    bill = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=0.0)
+    )
+
+    assert bill.total_amount == Decimal("0.00")
+    assert bill.payable_id is None
+    assert db_session.query(Payable).count() == 0
+
+
+def test_upsert_bill_creates_payable_once_amount_appears_later(db_session, user):
+    """Se a fatura vier a R$0 num sync e ganhar valor depois (nova compra,
+    correção do banco), o payable é criado nesse momento — `payable_id`
+    continua None até então."""
+    acc = _make_account(db_session, user)
+    first = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=0.0)
+    )
+    assert first.payable_id is None
+
+    second = bill_service.upsert_bill(
+        db_session, user.id, acc, "pluggy-acc-1", _bill_payload(total_amount=97.99)
+    )
+    assert second.id == first.id
+    assert second.payable_id is not None
+    payable = db_session.get(Payable, second.payable_id)
+    assert payable.amount == Decimal("97.99")
+
+
+def test_open_bill_that_closes_at_zero_releases_its_pending_payable(db_session, user):
+    """Mesmo bug do R$0, só que pelo caminho OPEN → CLOSED: o ciclo abriu com
+    valor (`upsert_open_bill` já criou o payable), e a fatura oficial chega
+    zerada (ex: anuidade estornada dentro do próprio ciclo, achado no
+    code-review desta issue). Sem o fix, `payable.amount` seria zerado e
+    ficaria PENDING pra sempre."""
+    acc = _make_account(db_session, user)
+    bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        _bill_payload(bill_id="closed-previous", due_date=_iso(date.today())),
+    )
+    open_bill = bill_service.upsert_open_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        [
+            {
+                "id": "tx-1",
+                "amount": 50.0,
+                "description": "compra",
+                "date": _iso(date.today()),
+                "type": "DEBIT",
+            }
+        ],
+    )
+    assert open_bill.payable_id is not None
+    open_payable_id = open_bill.payable_id
+
+    # a fatura oficial chega pelo mesmo external_id, agora fechada e em R$0
+    closed = bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        {
+            "id": open_bill.external_id,
+            "dueDate": _iso(open_bill.due_date),
+            "billClosingDate": _iso(date.today() - timedelta(days=1)),
+            "totalAmount": 0.0,
+        },
+    )
+
+    assert closed.id == open_bill.id
+    assert closed.status == CreditCardBillStatus.CLOSED
+    assert closed.payable_id is None
+    assert db_session.get(Payable, open_payable_id) is None
+
+
 def test_upsert_bill_is_idempotent(db_session, user):
     acc = _make_account(db_session, user)
     bill_service.upsert_bill(db_session, user.id, acc, "pluggy-acc-1", _bill_payload())
@@ -459,6 +544,297 @@ def test_sync_account_imports_bills_for_credit_accounts(db_session, user):
     closed = [b for b in bills if b.status == CreditCardBillStatus.CLOSED]
     assert len(closed) == 1
     assert closed[0].payable_id is not None
+
+
+def test_ignore_card_retires_open_bill_immediately(db_session, user):
+    """Diferente de `retire_vanished_open_bills`, ignorar é decisão explícita
+    do usuário — não espera carência nenhuma."""
+    acc = _make_account(db_session, user)
+    closed = bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        _bill_payload(bill_id="closed-1", due_date=_iso(date.today())),
+    )
+    open_bill = bill_service.upsert_open_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        [
+            {
+                "id": "tx-1",
+                "amount": 50.0,
+                "description": "compra",
+                "date": _iso(date.today()),
+                "type": "DEBIT",
+            }
+        ],
+    )
+    assert open_bill is not None
+    open_payable_id = open_bill.payable_id
+    assert open_payable_id is not None
+
+    bill_service.ignore_card(db_session, user.id, acc.id, "pluggy-acc-1")
+
+    # a fatura OPEN e o payable dela somem na hora...
+    assert db_session.get(CreditCardBill, open_bill.id) is None
+    assert db_session.get(Payable, open_payable_id) is None
+    # ...mas a fatura CLOSED (histórico oficial) nunca é tocada
+    assert db_session.get(CreditCardBill, closed.id) is not None
+    assert db_session.get(Payable, closed.payable_id) is not None
+
+
+def test_ignore_card_leaves_already_paid_open_payable_alone(db_session, user):
+    acc = _make_account(db_session, user)
+    bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        _bill_payload(bill_id="closed-1", due_date=_iso(date.today())),
+    )
+    open_bill = bill_service.upsert_open_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        [
+            {
+                "id": "tx-1",
+                "amount": 50.0,
+                "description": "compra",
+                "date": _iso(date.today()),
+                "type": "DEBIT",
+            }
+        ],
+    )
+    payable = db_session.get(Payable, open_bill.payable_id)
+    payable.status = PayableStatus.PAID
+    payable.payment_date = date.today()
+    db_session.add(payable)
+    db_session.commit()
+
+    bill_service.ignore_card(db_session, user.id, acc.id, "pluggy-acc-1")
+
+    # a fatura OPEN some (não é mais o ciclo corrente de um cartão ignorado),
+    # mas o payable já pago fica intacto — obrigação já honrada.
+    assert db_session.get(CreditCardBill, open_bill.id) is None
+    still_there = db_session.get(Payable, payable.id)
+    assert still_there is not None
+    assert still_there.status == PayableStatus.PAID
+
+
+def test_list_cards_reports_ignored_flag(db_session, user):
+    acc = _make_account(db_session, user)
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "card-a", _bill_payload(bill_id="a-1", total_amount=100.0)
+    )
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "card-b", _bill_payload(bill_id="b-1", total_amount=200.0)
+    )
+
+    cards = {
+        c["pluggy_account_id"]: c for c in bill_service.list_cards(db_session, user.id, acc.id)
+    }
+    assert cards["card-a"]["ignored"] is False
+    assert cards["card-b"]["ignored"] is False
+
+    bill_service.ignore_card(db_session, user.id, acc.id, "card-b")
+
+    cards = {
+        c["pluggy_account_id"]: c for c in bill_service.list_cards(db_session, user.id, acc.id)
+    }
+    assert cards["card-a"]["ignored"] is False
+    assert cards["card-b"]["ignored"] is True
+
+
+def test_sync_account_skips_ignored_card_entirely(db_session, user):
+    from app.services import bank_sync_service
+
+    acc = _make_account(db_session, user)
+    # ignore_card exige que o cartão já tenha aparecido antes (não dá pra
+    # confirmar posse de um pluggy_account_id nunca visto) — essa fatura
+    # velha só serve pra isso; ela é CLOSED de um mês bem anterior à janela,
+    # então nunca seria recontada pelo sync mockado abaixo de qualquer jeito.
+    bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "card-ignored",
+        _bill_payload(bill_id="old-1", due_date="2020-01-10T00:00:00Z", total_amount=15.99),
+    )
+    bill_service.ignore_card(db_session, user.id, acc.id, "card-ignored")
+
+    pluggy_accounts = [
+        SimpleNamespace(id="card-ignored", type="CREDIT", name="card-ignored"),
+    ]
+    bills_raw = SimpleNamespace(
+        data=json.dumps({"results": [_bill_payload(bill_id="should-not-sync")]}).encode()
+    )
+    tx_raw = SimpleNamespace(data=json.dumps({"results": [], "totalPages": 1}).encode())
+
+    with (
+        patch("app.services.bank_sync_service.get_api_client", return_value=_ctx_double()),
+        patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
+    ):
+        mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+            results=pluggy_accounts
+        )
+        mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = tx_raw
+        mock_sdk.BillApi.return_value.bills_list_without_preload_content.return_value = bills_raw
+
+        result = bank_sync_service.sync_account(db_session, acc)
+
+    assert result["bills_synced"] == 0
+    assert db_session.query(CreditCardBill).filter_by(external_id="should-not-sync").count() == 0
+
+
+def test_unignore_card_lets_it_sync_again(db_session, user):
+    """`upsert_bill` chamado direto não sabe nada de ignorar — quem decide
+    pular o cartão é `bank_sync_service.sync_account`. Por isso a prova real
+    de que "reativar" funciona é rodar o sync mockado de novo, igual
+    `test_sync_account_skips_ignored_card_entirely` faz pro lado ignorado."""
+    from app.services import bank_sync_service
+
+    acc = _make_account(db_session, user)
+    bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "card-a",
+        _bill_payload(bill_id="old-1", due_date="2020-01-10T00:00:00Z", total_amount=50.0),
+    )
+    bill_service.ignore_card(db_session, user.id, acc.id, "card-a")
+    bill_service.unignore_card(db_session, user.id, acc.id, "card-a")
+
+    assert bill_service.list_ignored_pluggy_account_ids(db_session, user.id) == set()
+
+    pluggy_accounts = [SimpleNamespace(id="card-a", type="CREDIT", name="card-a")]
+    bills_raw = SimpleNamespace(
+        data=json.dumps({"results": [_bill_payload(bill_id="should-sync")]}).encode()
+    )
+    tx_raw = SimpleNamespace(data=json.dumps({"results": [], "totalPages": 1}).encode())
+
+    with (
+        patch("app.services.bank_sync_service.get_api_client", return_value=_ctx_double()),
+        patch("app.services.bank_sync_service.pluggy_sdk") as mock_sdk,
+    ):
+        mock_sdk.AccountApi.return_value.accounts_list.return_value = SimpleNamespace(
+            results=pluggy_accounts
+        )
+        mock_sdk.TransactionApi.return_value.transactions_list_without_preload_content.return_value = tx_raw
+        mock_sdk.BillApi.return_value.bills_list_without_preload_content.return_value = bills_raw
+
+        result = bank_sync_service.sync_account(db_session, acc)
+
+    assert result["bills_synced"] == 1
+    assert db_session.query(CreditCardBill).filter_by(external_id="should-sync").count() == 1
+
+
+def test_ignore_card_endpoint(client, db_session, user):
+    acc = _make_account(db_session, user)
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "card-a", _bill_payload(bill_id="a-1", total_amount=100.0)
+    )
+
+    resp = client.get(f"/bank-accounts/{acc.id}/cards")
+    assert resp.status_code == 200
+    assert resp.json() == [{"pluggy_account_id": "card-a", "label": "card-a", "ignored": False}]
+
+    resp = client.post(f"/bank-accounts/{acc.id}/cards/card-a/ignore")
+    assert resp.status_code == 204
+
+    resp = client.get(f"/bank-accounts/{acc.id}/cards")
+    assert resp.json()[0]["ignored"] is True
+
+    resp = client.delete(f"/bank-accounts/{acc.id}/cards/card-a/ignore")
+    assert resp.status_code == 204
+
+    resp = client.get(f"/bank-accounts/{acc.id}/cards")
+    assert resp.json()[0]["ignored"] is False
+
+
+def test_ignore_unknown_card_returns_404(client, db_session, user):
+    """`pluggy_account_id` que nunca apareceu em nenhuma fatura desta conta
+    não pode ser ignorado — não dá pra confirmar que ele é mesmo dela."""
+    acc = _make_account(db_session, user)
+    resp = client.post(f"/bank-accounts/{acc.id}/cards/nunca-existiu/ignore")
+    assert resp.status_code == 404
+
+
+def test_ignore_card_from_another_account_is_rejected(client, db_session, user):
+    """Um cartão real, mas de OUTRA conexão do mesmo usuário, não pode ser
+    ignorado passando o account_id errado — cada IgnoredCard precisa bater
+    com a conexão a que o cartão pertence de verdade."""
+    acc_a = _make_account(db_session, user)
+    acc_b = BankAccount(
+        user_id=user.id,
+        name="Cartão Itaú",
+        bank_name="Itaú",
+        account_type="credit",
+        external_id=str(uuid4()),
+    )
+    db_session.add(acc_b)
+    db_session.commit()
+    db_session.refresh(acc_b)
+
+    bill_service.upsert_bill(
+        db_session, user.id, acc_b, "card-b", _bill_payload(bill_id="b-1", total_amount=100.0)
+    )
+
+    resp = client.post(f"/bank-accounts/{acc_a.id}/cards/card-b/ignore")
+    assert resp.status_code == 404
+
+
+def test_ignore_card_is_idempotent_under_concurrent_duplicate(db_session, user):
+    """Interleaving determinístico com uma segunda sessão apontando pro mesmo
+    banco (StaticPool): logo depois que a sessão do teste checa `existing` e
+    vê `None`, a "outra aba" insere e commita a mesma linha — então o
+    `db.flush()` de `ignore_card` bate de verdade na constraint única. Não
+    pode virar 500 pro usuário, e só uma linha sobrevive."""
+    from sqlalchemy.orm import sessionmaker
+
+    from app.models.ignored_card import IgnoredCard
+
+    acc = _make_account(db_session, user)
+    bill_service.upsert_bill(
+        db_session, user.id, acc, "card-a", _bill_payload(bill_id="a-1", total_amount=100.0)
+    )
+
+    OtherSession = sessionmaker(bind=db_session.get_bind())
+    real_execute = db_session.execute
+    call_count = {"n": 0}
+
+    def _execute_with_interleaved_race(*args, **kwargs):
+        call_count["n"] += 1
+        result = real_execute(*args, **kwargs)
+        if call_count["n"] == 2:
+            # 2ª chamada de `ignore_card` é o SELECT de `existing` — a
+            # "outra aba" ganha a corrida logo depois que esta viu `None`.
+            other = OtherSession()
+            other.add(
+                IgnoredCard(user_id=user.id, bank_account_id=acc.id, pluggy_account_id="card-a")
+            )
+            other.commit()
+            other.close()
+        return result
+
+    db_session.execute = _execute_with_interleaved_race
+    try:
+        bill_service.ignore_card(db_session, user.id, acc.id, "card-a")
+    finally:
+        db_session.execute = real_execute
+
+    assert db_session.query(IgnoredCard).filter_by(pluggy_account_id="card-a").count() == 1
+
+
+def _ctx_double():
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=ctx)
+    ctx.__exit__ = MagicMock(return_value=False)
+    return ctx
 
 
 def test_update_card_alias_updates_all_bills_and_payables(client, db_session, user):
