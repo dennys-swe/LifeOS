@@ -1,0 +1,27 @@
+# Mantém o backend Render Free acordado (issue #112).
+#
+# A instância Free hiberna após ~15min de inatividade e demora 50s+ pra
+# voltar (mesmo problema documentado em daily-sync.yml). Sem isso, o único
+# hit agendado no dia era o cron das 8h — qualquer usuário abrindo o app
+# fora dessa janela pagava o cold start inteiro na primeira requisição.
+#
+# Um ping a cada 10min mantém o dyno quente na prática (não é garantia
+# absoluta: o Render pode hibernar entre pings em picos de latência do
+# runner do GitHub, e o agendador do Actions pode atrasar alguns minutos em
+# horário de pico — irrelevante pra esse propósito). Grátis: repo público =
+# Actions ilimitado.
+
+name: keep-alive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: # permite disparar à mão pela aba Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pingar o backend
+        run: |
+          curl -fsS --max-time 60 https://lifeos-backend-sa9n.onrender.com/ > /dev/null
