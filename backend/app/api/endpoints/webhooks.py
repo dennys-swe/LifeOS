@@ -41,8 +41,7 @@ async def _process_pluggy_event(request: Request, background_tasks: BackgroundTa
             account = db.execute(
                 select(BankAccount).where(BankAccount.external_id == item_id)
             ).scalar_one_or_none()
-            if account is not None and bank_sync_service.can_start_sync(account):
-                bank_sync_service.start_sync(db, account)
+            if account is not None and bank_sync_service.try_start_sync(db, account):
                 background_tasks.add_task(
                     bank_sync_service.run_sync_job, account.id, account.user_id
                 )

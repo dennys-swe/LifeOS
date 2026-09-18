@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -10,7 +11,7 @@ from typing import List, Optional
 from uuid import UUID
 
 import pluggy_sdk
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
@@ -592,39 +593,159 @@ def sync_account(db: Session, account: BankAccount) -> dict:
 STALE_SYNC_LOCK = timedelta(minutes=15)
 
 
+def _as_aware_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """SQLite (testes) grava datetime sem tzinfo; Postgres (produção) também
+    devolve naive pra uma coluna sem `timezone=True`. Comparar isso direto
+    contra um `datetime.now(timezone.utc)` explodiria com `TypeError:
+    can't compare offset-naive and offset-aware datetimes`."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 def can_start_sync(account: BankAccount, *, now: Optional[datetime] = None) -> bool:
     """Pode disparar um sync para esta conta agora?"""
     if account.sync_status != BankAccountSyncStatus.SYNCING:
         return True
-    started = account.sync_started_at
+    started = _as_aware_utc(account.sync_started_at)
     now = now or datetime.now(timezone.utc)
-    if started is not None and started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
     return started is None or (now - started) > STALE_SYNC_LOCK
 
 
-def start_sync(db: Session, account: BankAccount) -> None:
-    """Marca a conta como 'sincronizando' — chamado na request antes de agendar o job em background."""
-    account.sync_status = BankAccountSyncStatus.SYNCING
-    account.sync_started_at = datetime.now(timezone.utc)
-    account.last_sync_error = None
-    db.add(account)
-    db.commit()
+# Issue #114 (sync ao abrir o app): acima disso sem sincronizar, a conta é
+# candidata a um sync automático em background. Mais curto que o cron diário
+# (que só cobre quem não abriu o app) — cobre quem abre o app com o dado de
+# horas atrás sem precisar clicar em "Sincronizar" na mão.
+STALE_ACCOUNT_THRESHOLD = timedelta(minutes=45)
 
 
-def run_sync_job(account_id: UUID, user_id: UUID) -> None:
-    """Job de background: roda fora do ciclo de vida da request, então abre sua própria sessão."""
+def is_stale(account: BankAccount, *, now: Optional[datetime] = None) -> bool:
+    """Já passou tempo o bastante desde o último sync bem-sucedido pra valer
+    a pena tentar de novo sozinho? Nunca sincronizada conta como velha.
+
+    Conta em `ERROR` também conta como velha independente de `last_sync_at`:
+    `sync_account` grava `last_sync_at` antes de rodar a conciliação (issue
+    achada no code-review), então uma falha na conciliação — depois das
+    transações já terem sido importadas com sucesso — deixa `last_sync_at`
+    fresco numa conta que visivelmente falhou. Sem isso, o sync automático
+    (issue #114) ignorava uma conta em erro pelos 45min inteiros do
+    threshold, mesmo sendo exatamente o tipo de conta que vale tentar de
+    novo sozinho.
+    """
+    if account.sync_status == BankAccountSyncStatus.ERROR:
+        return True
+    if account.last_sync_at is None:
+        return True
+    now = now or datetime.now(timezone.utc)
+    last_sync_at = _as_aware_utc(account.last_sync_at)
+    return (now - last_sync_at) > STALE_ACCOUNT_THRESHOLD
+
+
+def try_start_sync(
+    db: Session, account: BankAccount, *, now: Optional[datetime] = None, commit: bool = True
+) -> bool:
+    """Reivindica atomicamente o lock de sync desta conta.
+
+    Substitui o par `can_start_sync` (leitura) + escrita direta que existia
+    antes, que tinha uma corrida real: duas requisições quase simultâneas
+    (duas abas abertas, ou o sync automático da issue #114 disparando ao
+    mesmo tempo que um clique manual em "Sincronizar") liam
+    `sync_status == IDLE` cada uma na sua própria sessão, e as duas passavam
+    na checagem antes de qualquer uma escrever — resultado: dois
+    `run_sync_job` concorrentes pra mesma conta.
+
+    O `UPDATE` abaixo casa o `WHERE` contra o snapshot exato que
+    `can_start_sync` acabou de validar (`sync_status`/`sync_started_at` tal
+    como lidos) — se outra transação já reivindicou o lock entre a leitura e
+    este UPDATE, esses valores não batem mais na linha real do banco,
+    `rowcount` vem 0 e só uma das duas concorrentes vence. Comparar contra o
+    snapshot exato (não recalcular "mais velho que X" em SQL) evita
+    diferença de comparação de datetime naive/aware entre SQLite (testes) e
+    Postgres (produção).
+
+    `commit=False` (usado por `sync_all_bank_accounts`, que chama isto num
+    loop): pula o commit e o refresh individual — a sessão padrão expira
+    *todos* os objetos já carregados a cada `commit()` (`expire_on_commit`),
+    então commitar a cada conta do loop forçava um SELECT implícito extra
+    pra cada uma das contas seguintes só pra reler atributos que não
+    mudaram. As escritas continuam visíveis dentro da própria transação
+    (leitura-da-própria-escrita), então o `WHERE` de outra conta no mesmo
+    loop nunca vê um estado desatualizado — quem chama com `commit=False` é
+    responsável por commitar uma vez só, no final do loop.
+    """
+    now = now or datetime.now(timezone.utc)
+    if not can_start_sync(account, now=now):
+        return False
+
+    result = db.execute(
+        update(BankAccount)
+        .where(
+            BankAccount.id == account.id,
+            # `user_id` não muda o resultado hoje (`account` já vem de uma
+            # busca escopada por usuário nos três lugares que chamam isto),
+            # mas toda função de service que escreve dado tem que filtrar por
+            # ele — defesa em profundidade se um futuro chamador passar um
+            # `account` sem essa garantia.
+            BankAccount.user_id == account.user_id,
+            BankAccount.sync_status == account.sync_status,
+            # `Column == None` já compila pra `IS NULL` sozinho — não precisa
+            # de um branch separado pro caso `sync_started_at is None`.
+            BankAccount.sync_started_at == account.sync_started_at,
+        )
+        .values(
+            sync_status=BankAccountSyncStatus.SYNCING,
+            sync_started_at=now,
+            last_sync_error=None,
+        )
+    )
+    won = result.rowcount > 0
+    if won:
+        if commit:
+            db.commit()
+            db.refresh(account)
+        else:
+            # Sem commit, ainda assim o objeto em memória tem que refletir o
+            # que o UPDATE já gravou na linha real — um caller que olhar
+            # `account.sync_status` logo depois (mesmo antes do commit final
+            # dele) não pode ver o valor antigo. O commit final do caller vai
+            # fazer autoflush destes mesmos valores de novo (inofensivo, já
+            # é o que está no banco).
+            account.sync_status = BankAccountSyncStatus.SYNCING
+            account.sync_started_at = now
+            account.last_sync_error = None
+    elif commit:
+        # Perdeu a corrida: não commita — commitar mesmo assim commitaria de
+        # brinde qualquer outra alteração pendente nesta sessão sobre
+        # `account`, mesmo `try_start_sync` reportando que não reivindicou
+        # nada.
+        db.rollback()
+    return won
+
+
+def run_sync_job(account_id: UUID, user_id: UUID) -> bool:
+    """Job de background: roda fora do ciclo de vida da request, então abre
+    sua própria sessão. Devolve se sincronizou com sucesso — usado por
+    `daily_sync.run` (que chama isto sincronamente por conta, em vez de
+    reimplementar a mesma transição de status SYNCING → IDLE/ERROR) pra
+    contar `synced_accounts`/`errors`.
+    """
     db = SessionLocal()
     try:
-        account = get_account(db, user_id, account_id)
-        if account is None:
-            return
         try:
+            # `get_account` dentro do mesmo try que o resto: uma falha
+            # transitória de conexão bem aqui (achado no code-review) ficava
+            # de fora do catch-all abaixo e escapava da função inteira,
+            # quebrando a garantia de "nunca deixa uma exceção escapar" que
+            # `run_sync_jobs_concurrently`/`daily_sync.run` dependem.
+            account = get_account(db, user_id, account_id)
+            if account is None:
+                return False
             sync_account(db, account)
             account.sync_status = BankAccountSyncStatus.IDLE
             account.last_sync_error = None
             db.add(account)
             db.commit()
+            return True
         except Exception as exc:
             db.rollback()
             # Amplo de propósito: é o catch-all do job de background — se
@@ -636,11 +757,62 @@ def run_sync_job(account_id: UUID, user_id: UUID) -> None:
             # resposta da Pluggy ou outro detalhe interno que não deve
             # aparecer na tela do usuário.
             logger.exception("sync falhou (account=%s user=%s)", account_id, user_id)
-            account = get_account(db, user_id, account_id)
-            if account is not None:
-                account.sync_status = BankAccountSyncStatus.ERROR
-                account.last_sync_error = f"Falha ao sincronizar: {type(exc).__name__}"
-                db.add(account)
-                db.commit()
+            try:
+                account = get_account(db, user_id, account_id)
+                if account is not None:
+                    account.sync_status = BankAccountSyncStatus.ERROR
+                    account.last_sync_error = f"Falha ao sincronizar: {type(exc).__name__}"
+                    db.add(account)
+                    db.commit()
+            except Exception:
+                # Mesma falha transitória pode se repetir bem aqui — não pode
+                # escapar por causa disso também.
+                db.rollback()
+                logger.exception(
+                    "falha ao marcar ERROR depois de sync malsucedido (account=%s user=%s)",
+                    account_id,
+                    user_id,
+                )
+            return False
     finally:
         db.close()
+
+
+# Teto de contas sincronizando ao mesmo tempo — cada `run_sync_job` abre sua
+# própria sessão (`SessionLocal()`) e segura a conexão pela duração inteira
+# do sync (chamadas de rede pra Pluggy incluídas). Sem limite, um usuário com
+# muitas contas conectadas de uma vez satura sozinho o pool de conexões do
+# processo inteiro (padrão do SQLAlchemy: 5 + 10 overflow), travando
+# qualquer outra request concorrente — de qualquer usuário — nesse meio
+# tempo. 5 é conservador o bastante pra nunca ser o gargalo no uso pessoal
+# real (poucas contas por usuário).
+_MAX_CONCURRENT_SYNCS = 5
+
+
+async def run_sync_jobs_concurrently(pairs: List[tuple[UUID, UUID]]) -> None:
+    """Roda `run_sync_job` de várias contas em paralelo (issue #114).
+
+    Agendar um `background_tasks.add_task(run_sync_job, ...)` por conta
+    parece paralelo, mas o Starlette roda as `BackgroundTasks` de uma
+    request em sequência — mesmo despachando cada uma pra uma thread, espera
+    uma terminar antes de começar a próxima. Pra quem tem várias contas, o
+    "Atualizando…" do sync automático (issue #114) ficava no ar pela SOMA da
+    duração de cada sync, não o máximo. Uma única `BackgroundTasks` que
+    despacha todas via `asyncio.gather` roda de verdade em paralelo (até
+    `_MAX_CONCURRENT_SYNCS` por vez) — cada `run_sync_job` (síncrono, abre
+    sua própria sessão) numa thread própria via `asyncio.to_thread`.
+    `run_sync_job` já nunca deixa uma exceção escapar (seu próprio
+    try/except cobre isso e marca ERROR), mas `return_exceptions=True`
+    garante que uma falha inesperada numa conta nunca cancela as outras já
+    em andamento.
+    """
+    semaphore = asyncio.Semaphore(_MAX_CONCURRENT_SYNCS)
+
+    async def _run_with_limit(account_id: UUID, user_id: UUID) -> None:
+        async with semaphore:
+            await asyncio.to_thread(run_sync_job, account_id, user_id)
+
+    await asyncio.gather(
+        *(_run_with_limit(account_id, user_id) for account_id, user_id in pairs),
+        return_exceptions=True,
+    )
