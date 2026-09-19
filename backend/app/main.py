@@ -1,4 +1,5 @@
 import logging
+import time
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,6 +60,31 @@ async def security_headers(request: Request, call_next):
     # não quebra nada e fecha a superfície pra quem abrir a API no navegador.
     if request.url.path not in ("/docs", "/redoc"):
         response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    return response
+
+
+_timing_logger = logging.getLogger("app.timing")
+
+
+@app.middleware("http")
+async def request_timing(request: Request, call_next):
+    """Loga duração de cada request — issue #23 P3 (perfil de latência com
+    dado real). Registrado por último (= middleware mais externo, ver
+    comentário do RateLimitMiddleware acima) pra medir o tempo total
+    observado pelo cliente, CORS/rate limit/rota inclusos.
+    """
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+    level = logging.WARNING if duration_ms >= settings.slow_request_threshold_ms else logging.INFO
+    _timing_logger.log(
+        level,
+        "%s %s -> %d %.0fms",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
     return response
 
 
