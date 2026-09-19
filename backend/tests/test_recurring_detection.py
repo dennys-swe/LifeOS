@@ -5,7 +5,11 @@ from datetime import date
 
 from app.models.recurring_payable import RecurringPayable
 from app.models.transaction import Transaction, TransactionType
-from app.services.recurring_detection_service import detect_recurring_candidates
+from app.services.recurring_detection_service import (
+    DETECTION_WINDOW_MONTHS,
+    _window_start,
+    detect_recurring_candidates,
+)
 
 
 def _tx(db, user, description, amount, d):
@@ -84,6 +88,36 @@ def test_ignores_other_users_transactions(db_session, user, other_user):
     _tx(db_session, other_user, "NETFLIX.COM", 45.90, date(2026, 5, 5))
 
     assert detect_recurring_candidates(db_session, user.id) == []
+
+
+def test_ignores_transactions_older_than_detection_window(db_session, user):
+    """3 meses consecutivos de outra forma perfeitos (mesmo valor, mesmo dia)
+    não geram sugestão quando caem inteiramente antes da janela de detecção
+    — não seriam pegos nem no melhor caso (issue #132)."""
+    m1 = _window_start(date.today(), DETECTION_WINDOW_MONTHS + 1).replace(day=10)
+    m2 = _window_start(date.today(), DETECTION_WINDOW_MONTHS + 2).replace(day=10)
+    m3 = _window_start(date.today(), DETECTION_WINDOW_MONTHS + 3).replace(day=10)
+    _tx(db_session, user, "SEGURO ANTIGO", 200, m1)
+    _tx(db_session, user, "SEGURO ANTIGO", 200, m2)
+    _tx(db_session, user, "SEGURO ANTIGO", 200, m3)
+
+    assert detect_recurring_candidates(db_session, user.id) == []
+
+
+def test_includes_transaction_exactly_at_window_start(db_session, user):
+    """A borda da janela é inclusiva — uma transação bem no primeiro dia do
+    mês limite ainda conta (issue #132)."""
+    window_start = _window_start(date.today(), DETECTION_WINDOW_MONTHS)
+    m2 = _window_start(date.today(), DETECTION_WINDOW_MONTHS - 1)
+    m3 = _window_start(date.today(), DETECTION_WINDOW_MONTHS - 2)
+    _tx(db_session, user, "ASSINATURA LIMITE", 50, window_start)
+    _tx(db_session, user, "ASSINATURA LIMITE", 50, m2)
+    _tx(db_session, user, "ASSINATURA LIMITE", 50, m3)
+
+    suggestions = detect_recurring_candidates(db_session, user.id)
+
+    assert len(suggestions) == 1
+    assert suggestions[0].title == "ASSINATURA LIMITE"
 
 
 def test_suggestions_endpoint(client, db_session, user):
