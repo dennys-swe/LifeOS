@@ -57,8 +57,10 @@ def init_sentry() -> None:
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
         environment=settings.environment,
-        # Só rastreio de erros por enquanto — sem performance tracing.
-        traces_sample_rate=0.0,
+        # Performance tracing (issue #23 P3): amostra de requests pra ver
+        # breakdown real de latência por endpoint/query no Sentry. Sample
+        # rate baixo por padrão — ver `settings.sentry_traces_sample_rate`.
+        traces_sample_rate=settings.sentry_traces_sample_rate,
         send_default_pii=False,
     )
     _sentry_configured = True

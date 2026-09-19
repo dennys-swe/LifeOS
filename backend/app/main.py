@@ -1,4 +1,5 @@
 import logging
+import time
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -60,6 +61,41 @@ async def security_headers(request: Request, call_next):
     if request.url.path not in ("/docs", "/redoc"):
         response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     return response
+
+
+_timing_logger = logging.getLogger("app.timing")
+
+
+@app.middleware("http")
+async def request_timing(request: Request, call_next):
+    """Loga duração de cada request — issue #23 P3 (perfil de latência com
+    dado real). Registrado por último (= middleware mais externo, ver
+    comentário do RateLimitMiddleware acima) pra medir o tempo total
+    observado pelo cliente, CORS/rate limit/rota inclusos.
+    """
+    start = time.perf_counter()
+    status_code = "ERR"
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        # `finally` em vez de só depois do `await`: uma exceção não tratada
+        # que escapa de `call_next` (timeout, crash) não pode sumir do log
+        # de timing — são justamente os requests mais lentos que o perfil
+        # de latência precisa capturar.
+        duration_ms = (time.perf_counter() - start) * 1000
+        level = (
+            logging.WARNING if duration_ms >= settings.slow_request_threshold_ms else logging.INFO
+        )
+        _timing_logger.log(
+            level,
+            "%s %s -> %s %.0fms",
+            request.method,
+            request.url.path,
+            status_code,
+            duration_ms,
+        )
 
 
 app.include_router(fastapi_users.get_auth_router(auth_backend), prefix="/auth/jwt", tags=["Auth"])

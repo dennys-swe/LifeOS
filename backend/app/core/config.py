@@ -27,7 +27,14 @@ class Settings(BaseSettings):
     # Observabilidade. Sem SENTRY_DSN o Sentry fica desligado (dev e testes).
     # O environment reportado ao Sentry é `self.environment`.
     sentry_dsn: str | None = None
+    # Fração de requests com performance tracing (0.0 = desligado). Baixo por
+    # padrão pra caber na cota do plano free do Sentry mesmo se o tráfego
+    # crescer; ajustável via env sem precisar de deploy de código.
+    sentry_traces_sample_rate: float = 0.1
     log_level: str = "INFO"
+    # Duração (ms) acima da qual o middleware de timing loga em WARNING em
+    # vez de INFO — fica fácil filtrar requests lentos nos logs do Render.
+    slow_request_threshold_ms: int = 1000
 
     pluggy_client_id: str | None = None
     pluggy_client_secret: str | None = None

@@ -42,10 +42,12 @@ def test_init_sentry_initializes_when_dsn_present(monkeypatch):
     monkeypatch.setattr(observability, "_sentry_configured", False)
     monkeypatch.setattr(observability.settings, "sentry_dsn", "https://k@o0.ingest.sentry.io/1")
     monkeypatch.setattr(observability.settings, "environment", "staging")
+    monkeypatch.setattr(observability.settings, "sentry_traces_sample_rate", 0.25)
 
     init_sentry()
 
     assert calls["dsn"] == "https://k@o0.ingest.sentry.io/1"
     assert calls["environment"] == "staging"
     assert calls["send_default_pii"] is False
+    assert calls["traces_sample_rate"] == 0.25
     assert observability._sentry_configured is True
