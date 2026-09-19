@@ -5,17 +5,24 @@
 # hit agendado no dia era o cron das 8h — qualquer usuário abrindo o app
 # fora dessa janela pagava o cold start inteiro na primeira requisição.
 #
-# Um ping a cada 10min mantém o dyno quente na prática (não é garantia
-# absoluta: o Render pode hibernar entre pings em picos de latência do
-# runner do GitHub, e o agendador do Actions pode atrasar alguns minutos em
-# horário de pico — irrelevante pra esse propósito). Grátis: repo público =
-# Actions ilimitado.
+# Um ping a cada 10min mantinha o Render quente, mas não o Neon: o free tier
+# do Neon suspende a compute após ~5min de ociosidade (issue #127), então um
+# gap de 10min deixava o banco hibernar entre pings — daí os outliers de
+# `max` bem acima do `p50` na tabela do perf_probe.
+#
+# 5min é o intervalo mínimo que o GitHub Actions garante pra cron agendado
+# (docs: "the shortest interval you can run scheduled workflows is once
+# every 5 minutes") — não dá pra ir mais apertado só com Actions. Mesmo
+# assim fica justo contra os ~5min do Neon (o agendador do Actions pode
+# atrasar alguns minutos em horário de pico), então outliers ocasionais
+# continuam possíveis, só bem mais raros que com 10min. Grátis: repo
+# público = Actions ilimitado.
 
 name: keep-alive
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch: # permite disparar à mão pela aba Actions
 
 jobs:
