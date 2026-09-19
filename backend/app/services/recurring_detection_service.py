@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import List
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Row, select
 from sqlalchemy.orm import Session
 
 from app.models.recurring_payable import RecurringPayable
@@ -27,20 +27,19 @@ def _normalize_description(description: str) -> str:
 
 
 def detect_recurring_candidates(db: Session, user_id: UUID) -> List[RecurringSuggestion]:
-    transactions = (
-        db.execute(
-            select(Transaction).where(
-                Transaction.user_id == user_id,
-                Transaction.type == TransactionType.EXPENSE,
-                # Transferência recorrente entre as próprias contas não é conta a
-                # pagar — e é volumosa (219 "Same person transfer" no extrato real
-                # do dono), então dominava as sugestões.
-                Transaction.is_transfer.is_(False),
-            )
+    # Só as colunas usadas no algoritmo abaixo (description/date/amount) —
+    # evita hidratar um objeto ORM completo por transação do histórico
+    # inteiro do usuário (issue #131).
+    transactions = db.execute(
+        select(Transaction.description, Transaction.date, Transaction.amount).where(
+            Transaction.user_id == user_id,
+            Transaction.type == TransactionType.EXPENSE,
+            # Transferência recorrente entre as próprias contas não é conta a
+            # pagar — e é volumosa (219 "Same person transfer" no extrato real
+            # do dono), então dominava as sugestões.
+            Transaction.is_transfer.is_(False),
         )
-        .scalars()
-        .all()
-    )
+    ).all()
 
     existing_titles = {
         rec.title.strip().upper()
@@ -49,7 +48,7 @@ def detect_recurring_candidates(db: Session, user_id: UUID) -> List[RecurringSug
         .all()
     }
 
-    groups: dict[str, list[Transaction]] = defaultdict(list)
+    groups: dict[str, list[Row]] = defaultdict(list)
     for tx in transactions:
         key = _normalize_description(tx.description)
         if not key:
