@@ -17,6 +17,8 @@ def test_request_timing_logs_duration(caplog):
             response = client.get("/")
 
     assert response.status_code == 200
+    assert "X-Response-Time-Ms" in response.headers
+    assert float(response.headers["X-Response-Time-Ms"]) >= 0
     records = [r for r in caplog.records if r.name == "app.timing"]
     assert len(records) == 1
     assert records[0].levelno == logging.INFO

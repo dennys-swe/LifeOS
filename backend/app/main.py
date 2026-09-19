@@ -72,19 +72,28 @@ async def request_timing(request: Request, call_next):
     dado real). Registrado por último (= middleware mais externo, ver
     comentário do RateLimitMiddleware acima) pra medir o tempo total
     observado pelo cliente, CORS/rate limit/rota inclusos.
+    Também expõe `X-Response-Time-Ms` na resposta (issue #125) — separa
+    tempo de servidor de tempo de rede quando medido de fora (ex:
+    `scripts/perf_probe.py`), sem depender do Sentry pra isso. Não entra em
+    `expose_headers` do CORS: hoje só ferramentas server-to-server o leem,
+    não o frontend (browser esconderia o header cross-origin sem isso).
     """
     start = time.perf_counter()
     status_code = "ERR"
+    duration_ms: float | None = None
     try:
         response = await call_next(request)
         status_code = response.status_code
+        duration_ms = (time.perf_counter() - start) * 1000
+        response.headers["X-Response-Time-Ms"] = f"{duration_ms:.0f}"
         return response
     finally:
         # `finally` em vez de só depois do `await`: uma exceção não tratada
         # que escapa de `call_next` (timeout, crash) não pode sumir do log
         # de timing — são justamente os requests mais lentos que o perfil
         # de latência precisa capturar.
-        duration_ms = (time.perf_counter() - start) * 1000
+        if duration_ms is None:
+            duration_ms = (time.perf_counter() - start) * 1000
         level = (
             logging.WARNING if duration_ms >= settings.slow_request_threshold_ms else logging.INFO
         )
