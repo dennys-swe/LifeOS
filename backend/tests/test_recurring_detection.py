@@ -12,6 +12,12 @@ from app.services.recurring_detection_service import (
 )
 
 
+def _recent(months_ago: int, day: int) -> date:
+    """Dia `day` do mês `months_ago` meses atrás de hoje — evita datas fixas
+    que caem fora de DETECTION_WINDOW_MONTHS conforme o tempo passa."""
+    return _window_start(date.today(), months_ago).replace(day=day)
+
+
 def _tx(db, user, description, amount, d):
     t = Transaction(
         id=uuid.uuid4(),
@@ -27,9 +33,9 @@ def _tx(db, user, description, amount, d):
 
 
 def test_detects_recurring_expense_across_three_months(db_session, user):
-    _tx(db_session, user, "NETFLIX.COM", 45.90, date(2026, 3, 5))
-    _tx(db_session, user, "NETFLIX.COM", 45.90, date(2026, 4, 5))
-    _tx(db_session, user, "NETFLIX.COM", 45.90, date(2026, 5, 5))
+    _tx(db_session, user, "NETFLIX.COM", 45.90, _recent(2, 5))
+    _tx(db_session, user, "NETFLIX.COM", 45.90, _recent(1, 5))
+    _tx(db_session, user, "NETFLIX.COM", 45.90, _recent(0, 5))
 
     suggestions = detect_recurring_candidates(db_session, user.id)
 
@@ -41,24 +47,24 @@ def test_detects_recurring_expense_across_three_months(db_session, user):
 
 
 def test_ignores_expenses_seen_in_fewer_than_three_months(db_session, user):
-    _tx(db_session, user, "ACADEMIA", 100, date(2026, 3, 10))
-    _tx(db_session, user, "ACADEMIA", 100, date(2026, 4, 10))
+    _tx(db_session, user, "ACADEMIA", 100, _recent(1, 10))
+    _tx(db_session, user, "ACADEMIA", 100, _recent(0, 10))
 
     assert detect_recurring_candidates(db_session, user.id) == []
 
 
 def test_ignores_amount_outside_tolerance(db_session, user):
-    _tx(db_session, user, "ALUGUEL", 1000, date(2026, 3, 10))
-    _tx(db_session, user, "ALUGUEL", 1000, date(2026, 4, 10))
-    _tx(db_session, user, "ALUGUEL", 1300, date(2026, 5, 10))  # 30% acima
+    _tx(db_session, user, "ALUGUEL", 1000, _recent(2, 10))
+    _tx(db_session, user, "ALUGUEL", 1000, _recent(1, 10))
+    _tx(db_session, user, "ALUGUEL", 1300, _recent(0, 10))  # 30% acima
 
     assert detect_recurring_candidates(db_session, user.id) == []
 
 
 def test_ignores_day_outside_tolerance(db_session, user):
-    _tx(db_session, user, "SPOTIFY", 21.90, date(2026, 3, 1))
-    _tx(db_session, user, "SPOTIFY", 21.90, date(2026, 4, 1))
-    _tx(db_session, user, "SPOTIFY", 21.90, date(2026, 5, 20))  # dia muito distante
+    _tx(db_session, user, "SPOTIFY", 21.90, _recent(2, 1))
+    _tx(db_session, user, "SPOTIFY", 21.90, _recent(1, 1))
+    _tx(db_session, user, "SPOTIFY", 21.90, _recent(0, 20))  # dia muito distante
 
     assert detect_recurring_candidates(db_session, user.id) == []
 
@@ -75,17 +81,17 @@ def test_excludes_titles_already_recurring(db_session, user):
     )
     db_session.commit()
 
-    _tx(db_session, user, "NETFLIX.COM", 45.90, date(2026, 3, 5))
-    _tx(db_session, user, "NETFLIX.COM", 45.90, date(2026, 4, 5))
-    _tx(db_session, user, "NETFLIX.COM", 45.90, date(2026, 5, 5))
+    _tx(db_session, user, "NETFLIX.COM", 45.90, _recent(2, 5))
+    _tx(db_session, user, "NETFLIX.COM", 45.90, _recent(1, 5))
+    _tx(db_session, user, "NETFLIX.COM", 45.90, _recent(0, 5))
 
     assert detect_recurring_candidates(db_session, user.id) == []
 
 
 def test_ignores_other_users_transactions(db_session, user, other_user):
-    _tx(db_session, other_user, "NETFLIX.COM", 45.90, date(2026, 3, 5))
-    _tx(db_session, other_user, "NETFLIX.COM", 45.90, date(2026, 4, 5))
-    _tx(db_session, other_user, "NETFLIX.COM", 45.90, date(2026, 5, 5))
+    _tx(db_session, other_user, "NETFLIX.COM", 45.90, _recent(2, 5))
+    _tx(db_session, other_user, "NETFLIX.COM", 45.90, _recent(1, 5))
+    _tx(db_session, other_user, "NETFLIX.COM", 45.90, _recent(0, 5))
 
     assert detect_recurring_candidates(db_session, user.id) == []
 
@@ -121,9 +127,9 @@ def test_includes_transaction_exactly_at_window_start(db_session, user):
 
 
 def test_suggestions_endpoint(client, db_session, user):
-    _tx(db_session, user, "NETFLIX.COM", 45.90, date(2026, 3, 5))
-    _tx(db_session, user, "NETFLIX.COM", 45.90, date(2026, 4, 5))
-    _tx(db_session, user, "NETFLIX.COM", 45.90, date(2026, 5, 5))
+    _tx(db_session, user, "NETFLIX.COM", 45.90, _recent(2, 5))
+    _tx(db_session, user, "NETFLIX.COM", 45.90, _recent(1, 5))
+    _tx(db_session, user, "NETFLIX.COM", 45.90, _recent(0, 5))
 
     response = client.get("/recurring-payables/suggestions")
     assert response.status_code == 200
