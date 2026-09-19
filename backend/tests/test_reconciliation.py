@@ -113,6 +113,23 @@ def test_suggest_exact_match(db_session, user):
     assert suggestions[0].transaction_id == t.id
 
 
+def test_suggest_reconciliation_matches_all_payables_sharing_same_amount(db_session, user):
+    """Dois payables PENDING de mesmo valor (empate) — o bucket por valor da
+    otimização de #130 precisa devolver os dois como candidatos, não só o
+    primeiro que casar."""
+    p_exact = _payable(db_session, user, 100, date(2026, 5, 10))
+    p_within_range = _payable(db_session, user, 100, date(2026, 5, 14))
+    t = _transaction(db_session, user, 100, date(2026, 5, 10))
+
+    suggestions = suggest_reconciliation(db_session, user.id, [t])
+
+    payable_ids = {s.payable_id for s in suggestions}
+    assert payable_ids == {p_exact.id, p_within_range.id}
+    scores = {s.payable_id: s.confidence_score for s in suggestions}
+    assert scores[p_exact.id] == 1.0  # data exata
+    assert scores[p_within_range.id] == 0.8  # dentro da janela, não exata
+
+
 def test_suggest_requires_exact_amount(db_session, user):
     """Valor aproximado não sugere mais.
 

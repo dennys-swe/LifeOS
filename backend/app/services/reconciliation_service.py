@@ -156,6 +156,20 @@ def suggest_reconciliation(
     if bill_payable_ids is None:
         bill_payable_ids = bill_payable_ids_for_user(db, user_id)
 
+    # Valor aproximado foi abandonado: medido contra os 91 payables já pagos
+    # do dono, a tolerância de ±5% achava 55 (60%) contra 51 (56%) do valor
+    # exato — 4 acertos a mais. Em troca, casava qualquer compra de valor
+    # parecido na janela de datas: a conta de água de R$ 14 batia com
+    # farmácia, encargo e posto, e as 5 sugestões pendentes eram todas
+    # falsas. Precisão vale mais que 4% de recall numa tela que pede
+    # confirmação manual. Como o match de valor é sempre exato, bucketizar
+    # os payables por valor troca o laço aninhado O(transações × payables)
+    # por um lookup direto — cada bucket preserva a ordem original de
+    # `pending_payables`, então a saída não muda.
+    payables_by_amount: dict[Decimal, list[Payable]] = {}
+    for payable in pending_payables:
+        payables_by_amount.setdefault(Decimal(str(payable.amount)), []).append(payable)
+
     suggestions: List[ReconciliationSuggestionResponse] = []
 
     for tx in transactions:
@@ -163,25 +177,19 @@ def suggest_reconciliation(
             continue
 
         tx_amount = Decimal(str(tx.amount))
+        candidates = payables_by_amount.get(tx_amount)
+        if not candidates:
+            continue
 
-        for payable in pending_payables:
+        # Calculado uma vez por transação, não por par — não depende do
+        # payable candidato.
+        is_real_bill_payment = _is_real_bill_payment(tx)
+
+        for payable in candidates:
             # Fatura de cartão: uma cobrança comum do próprio cartão não pode
             # se passar por pagamento só porque o valor bate (issue relatada
             # pelo dono — anuidade do Luiza "quitando" a própria fatura).
-            if payable.id in bill_payable_ids and not _is_real_bill_payment(tx):
-                continue
-
-            p_amount = Decimal(str(payable.amount))
-            exact_amount = tx_amount == p_amount
-
-            # Valor aproximado foi abandonado: medido contra os 91 payables já
-            # pagos do dono, a tolerância de ±5% achava 55 (60%) contra 51 (56%)
-            # do valor exato — 4 acertos a mais. Em troca, casava qualquer
-            # compra de valor parecido na janela de datas: a conta de água de
-            # R$ 14 batia com farmácia, encargo e posto, e as 5 sugestões
-            # pendentes eram todas falsas. Precisão vale mais que 4% de recall
-            # numa tela que pede confirmação manual.
-            if not exact_amount:
+            if payable.id in bill_payable_ids and not is_real_bill_payment:
                 continue
 
             date_diff = abs((payable.due_date - tx.date).days)
@@ -191,14 +199,14 @@ def suggest_reconciliation(
             if not exact_date and not within_range:
                 continue
 
-            score = _compute_score(exact_amount, exact_date)
+            score = _compute_score(exact_amount=True, exact_date=exact_date)
             suggestions.append(
                 ReconciliationSuggestionResponse(
                     transaction_id=tx.id,
                     payable_id=payable.id,
                     confidence_score=score,
                     payable_title=payable.title,
-                    payable_amount=p_amount,
+                    payable_amount=tx_amount,
                     transaction_description=tx.description,
                     transaction_amount=tx_amount,
                 )
