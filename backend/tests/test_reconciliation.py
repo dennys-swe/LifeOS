@@ -363,6 +363,46 @@ def test_suggest_pending_excludes_already_reconciled_transactions(db_session, us
     assert suggestions == []
 
 
+def test_suggest_pending_returns_empty_without_querying_transactions_when_no_pending(
+    db_session, user
+):
+    """Sem nenhum payable PENDING, nenhuma transação pode virar sugestão —
+    suggest_pending nem chega a consultar a tabela de transações (issue
+    #129)."""
+    _payable(db_session, user, 100, date(2026, 5, 10), status=PayableStatus.PAID)
+    _transaction(db_session, user, 100, date(2026, 5, 10))
+
+    assert suggest_pending(db_session, user.id) == []
+
+
+def test_suggest_pending_ignores_transaction_outside_date_window(db_session, user):
+    """Uma transação mais de DATE_TOLERANCE_DAYS (7) fora do due_date de
+    QUALQUER payable PENDING não pode gerar sugestão, por construção do
+    filtro de data em suggest_reconciliation — suggest_pending usa isso pra
+    nem carregar a transação (issue #129)."""
+    _payable(db_session, user, 100, date(2026, 5, 10))
+    # 8 dias de distância do único payable PENDING — fora da janela de ±7.
+    _transaction(db_session, user, 100, date(2026, 5, 18))
+
+    assert suggest_pending(db_session, user.id) == []
+
+
+def test_suggest_pending_window_spans_multiple_pending_payables(db_session, user):
+    """A janela usa o min/max due_date de TODOS os payables PENDING, não só
+    um — uma transação perto do payable mais distante no tempo ainda deve
+    aparecer (issue #129)."""
+    _payable(db_session, user, 100, date(2026, 5, 10))
+    p_late = _payable(db_session, user, 250, date(2026, 8, 20))
+    # Perto do payable de agosto, longe do de maio — só entra na janela
+    # porque ela considera o max(due_date), não só o primeiro payable.
+    _transaction(db_session, user, 250, date(2026, 8, 22))
+
+    suggestions = suggest_pending(db_session, user.id)
+
+    assert len(suggestions) == 1
+    assert suggestions[0].payable_id == p_late.id
+
+
 def test_suggest_pending_auto_resolves_old_bill_payment_echoes(db_session, user):
     """O ponto real do bug reportado: as duas transações do eco de fatura já
     existiam há meses (importadas antes desta correção), não vieram de um
