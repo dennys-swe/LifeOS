@@ -74,18 +74,28 @@ async def request_timing(request: Request, call_next):
     observado pelo cliente, CORS/rate limit/rota inclusos.
     """
     start = time.perf_counter()
-    response = await call_next(request)
-    duration_ms = (time.perf_counter() - start) * 1000
-    level = logging.WARNING if duration_ms >= settings.slow_request_threshold_ms else logging.INFO
-    _timing_logger.log(
-        level,
-        "%s %s -> %d %.0fms",
-        request.method,
-        request.url.path,
-        response.status_code,
-        duration_ms,
-    )
-    return response
+    status_code = "ERR"
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        # `finally` em vez de só depois do `await`: uma exceção não tratada
+        # que escapa de `call_next` (timeout, crash) não pode sumir do log
+        # de timing — são justamente os requests mais lentos que o perfil
+        # de latência precisa capturar.
+        duration_ms = (time.perf_counter() - start) * 1000
+        level = (
+            logging.WARNING if duration_ms >= settings.slow_request_threshold_ms else logging.INFO
+        )
+        _timing_logger.log(
+            level,
+            "%s %s -> %s %.0fms",
+            request.method,
+            request.url.path,
+            status_code,
+            duration_ms,
+        )
 
 
 app.include_router(fastapi_users.get_auth_router(auth_backend), prefix="/auth/jwt", tags=["Auth"])
