@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import statistics
 from collections import Counter, defaultdict
+from datetime import date
 from decimal import Decimal
 from typing import List
 from uuid import UUID
@@ -17,6 +18,12 @@ from app.schemas.recurring_detection import RecurringSuggestion
 MIN_DISTINCT_MONTHS = 3
 AMOUNT_TOLERANCE = 0.10
 MAX_DAY_DEVIATION = 3
+# Histórico considerado pra detecção (issue #132). Sem isso, a checagem de
+# tolerância de valor/dia (abaixo) roda contra transações de anos atrás —
+# uma assinatura cujo preço subiu há muito tempo é rejeitada hoje porque um
+# valor antigo cai fora de ±10% da mediana, mesmo sendo claramente recorrente
+# nos meses recentes. Também evita hidratar/agrupar o histórico inteiro.
+DETECTION_WINDOW_MONTHS = 18
 
 _NORMALIZE_RE = re.compile(r"[0-9]+|\s+")
 
@@ -26,14 +33,24 @@ def _normalize_description(description: str) -> str:
     return collapsed.strip()
 
 
+def _window_start(today: date, months: int) -> date:
+    """Primeiro dia do mês `months` meses atrás de `today`."""
+    index = today.month - months
+    year = today.year + (index - 1) // 12
+    month = (index - 1) % 12 + 1
+    return date(year, month, 1)
+
+
 def detect_recurring_candidates(db: Session, user_id: UUID) -> List[RecurringSuggestion]:
     # Só as colunas usadas no algoritmo abaixo (description/date/amount) —
     # evita hidratar um objeto ORM completo por transação do histórico
     # inteiro do usuário (issue #131).
+    window_start = _window_start(date.today(), DETECTION_WINDOW_MONTHS)
     transactions = db.execute(
         select(Transaction.description, Transaction.date, Transaction.amount).where(
             Transaction.user_id == user_id,
             Transaction.type == TransactionType.EXPENSE,
+            Transaction.date >= window_start,
             # Transferência recorrente entre as próprias contas não é conta a
             # pagar — e é volumosa (219 "Same person transfer" no extrato real
             # do dono), então dominava as sugestões.
