@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import List
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.credit_card_bill import CreditCardBill
@@ -52,6 +53,26 @@ def _compute_score(exact_amount: bool, exact_date: bool) -> float:
     return 1.0 if exact_amount and exact_date else 0.8
 
 
+def _pending_payables_date_range(db: Session, user_id: UUID) -> tuple[date, date] | None:
+    """[min(due_date) - DATE_TOLERANCE_DAYS, max(due_date) + DATE_TOLERANCE_DAYS]
+    dos payables PENDING do usuário, ou `None` se não houver nenhum.
+
+    `suggest_reconciliation` só aceita um candidato com `date_diff <=
+    DATE_TOLERANCE_DAYS` — nenhuma transação fora desse range pode gerar
+    sugestão, por construção. `suggest_pending` usa isso pra não carregar o
+    histórico de transações inteiro quando só uma fração cabe na janela de
+    algum payable pendente."""
+    min_due, max_due = db.execute(
+        select(func.min(Payable.due_date), func.max(Payable.due_date)).where(
+            Payable.user_id == user_id, Payable.status == PayableStatus.PENDING
+        )
+    ).one()
+    if min_due is None:
+        return None
+    tolerance = timedelta(days=DATE_TOLERANCE_DAYS)
+    return min_due - tolerance, max_due + tolerance
+
+
 def suggest_pending(db: Session, user_id: UUID) -> List[ReconciliationSuggestionResponse]:
     """Sugestões de conciliação sobre todo o histórico não conciliado do usuário —
     usado pela tela de Bancos & Faturas para mostrar confirmações pendentes mesmo
@@ -61,10 +82,17 @@ def suggest_pending(db: Session, user_id: UUID) -> List[ReconciliationSuggestion
     devolver a lista — o auto-reconcile do sync só enxerga as transações
     recém-importadas daquele request, então casos óbvios (ex: eco de
     pagamento de fatura) de transações mais antigas só se resolvem aqui."""
+    date_range = _pending_payables_date_range(db, user_id)
+    if date_range is None:
+        return []
+    start, end = date_range
+
     unreconciled = (
         db.execute(
             select(Transaction).where(
                 Transaction.user_id == user_id,
+                Transaction.date >= start,
+                Transaction.date <= end,
                 _is_reconcilable(),
                 ~Transaction.id.in_(
                     select(Payable.transaction_id).where(
