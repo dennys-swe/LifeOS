@@ -143,7 +143,7 @@ SPA roteada com **react-router** (`BrowserRouter`).
 
 **Exclusão com Undo:** remoção é otimista — item sai do estado imediatamente e um `setTimeout` de 5s dispara o `DELETE` real. O botão "Desfazer" no Toast cancela o timeout e restaura o item sem chamada de API.
 
-**Estado compartilhado:** nunca buscar `/payables` ou `/categories` diretamente dentro de páginas. Usar `useFinance()` do FinanceContext. Chamar `refresh()` após qualquer mutação (create, update, delete, pay).
+**Estado compartilhado:** nunca buscar `/payables` ou `/categories` diretamente dentro de páginas. Usar `useFinance()` do FinanceContext. Chamar `refresh()` após qualquer mutação (create, update, delete, pay) — **exceto** editar apelido/cor de fatura em `DashboardPage` (`handleSaveAlias`/`handlePickColor`), que usa `updateBills()` em vez disso: `refresh()` limpa o cache inteiro do `FinanceContext` e força um fetch não silencioso (`loading=true`), derrubando a tela toda pra skeleton só por causa de um campo de uma fatura. `updateBills()` atualiza `bills` na hora (sem flash) e dispara um refetch silencioso de `payables` por baixo dos panos (o backend também reescreve `Payable.title` ao renomear um cartão).
 
 ### Modelos e Domínios
 
