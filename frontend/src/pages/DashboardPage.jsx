@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 import CategorySpendList from "../components/dashboard/CategorySpendList";
@@ -20,10 +20,6 @@ const TrendChart = lazy(() => import("../components/dashboard/TrendChart"));
 function pctChange(current, previous) {
   if (!previous || Number(previous) === 0) return null;
   return ((Number(current) - Number(previous)) / Math.abs(Number(previous))) * 100;
-}
-
-function prevMonthYear(month, year) {
-  return month === 1 ? [12, year - 1] : [month - 1, year];
 }
 
 function IconCreditCard({ className }) {
@@ -91,12 +87,8 @@ function CardColorPicker({ current, onPick, onClose }) {
 }
 
 export default function DashboardPage({ month, year, onMonthChange }) {
-  const { summary, payables, loading, refresh } = useFinance();
-  const [prevSummary, setPrevSummary] = useState(null);
-  const [insights, setInsights] = useState([]);
-  const [history, setHistory] = useState([]);
-  const [upcoming, setUpcoming] = useState([]);
-  const [bills, setBills] = useState([]);
+  const { summary, payables, loading, upcoming, bills, updateBills, prevSummary, insights, history } =
+    useFinance();
   const [editingBillId, setEditingBillId] = useState(null);
   const [editingAliasValue, setEditingAliasValue] = useState("");
   const [colorPickerBillId, setColorPickerBillId] = useState(null);
@@ -106,20 +98,30 @@ export default function DashboardPage({ month, year, onMonthChange }) {
     setEditingAliasValue(bill.custom_card_name || bill.card_name || "");
   };
 
+  // Nem handleSaveAlias nem handlePickColor chamam `refresh()` depois do
+  // PATCH — foge da convenção do projeto ("chamar refresh() após qualquer
+  // mutação", CLAUDE.md), de propósito: `refresh()` limpa o cache inteiro
+  // e força um fetch não silencioso (loading=true), derrubando a tela
+  // inteira pra skeleton só porque um campo de uma fatura mudou.
+  // `updateBills` já cobre a sincronização necessária — atualiza `bills`
+  // na hora e dispara um refetch silencioso de `payables` por baixo dos
+  // panos (o título do payable também é reescrito pelo backend quando o
+  // cartão é renomeado; ver FinanceContext.jsx).
   const handleSaveAlias = async (bill) => {
     const val = editingAliasValue.trim();
     setEditingBillId(null);
     const newCustomName = val || null;
 
-    setBills((prev) =>
+    updateBills((prev) =>
       prev.map((b) => (b.id === bill.id ? { ...b, custom_card_name: newCustomName } : b))
     );
 
     try {
       await api.patch(`/credit-card-bills/${bill.id}`, { custom_card_name: newCustomName });
-      refresh?.();
     } catch {
-      api.get("/credit-card-bills", { params: { month, year } }).then((r) => setBills(r.data ?? []));
+      api
+        .get("/credit-card-bills", { params: { month, year } })
+        .then((r) => updateBills(() => r.data ?? []));
     }
   };
 
@@ -127,7 +129,7 @@ export default function DashboardPage({ month, year, onMonthChange }) {
     setColorPickerBillId(null);
     // A cor é do cartão, não da fatura — todas as faturas do mesmo cartão
     // mudam juntas, igual ao backend faz.
-    setBills((prev) =>
+    updateBills((prev) =>
       prev.map((b) =>
         b.pluggy_account_id === bill.pluggy_account_id ? { ...b, custom_color_hex: color } : b
       )
@@ -136,41 +138,11 @@ export default function DashboardPage({ month, year, onMonthChange }) {
     try {
       await api.patch(`/credit-card-bills/${bill.id}`, { custom_color_hex: color });
     } catch {
-      api.get("/credit-card-bills", { params: { month, year } }).then((r) => setBills(r.data ?? []));
+      api
+        .get("/credit-card-bills", { params: { month, year } })
+        .then((r) => updateBills(() => r.data ?? []));
     }
   };
-
-  const [prevMonth, prevYear] = prevMonthYear(month, year);
-
-  useEffect(() => {
-    api.get("/payables/upcoming?days=7")
-      .then((r) => setUpcoming(r.data ?? []))
-      .catch(() => setUpcoming([]));
-  }, [refresh]);
-
-  useEffect(() => {
-    api.get("/credit-card-bills", { params: { month, year } })
-      .then((r) => setBills(r.data ?? []))
-      .catch(() => setBills([]));
-  }, [month, year, refresh]);
-
-  useEffect(() => {
-    api.get("/summary", { params: { month: prevMonth, year: prevYear } })
-      .then((r) => setPrevSummary(r.data ?? null))
-      .catch(() => setPrevSummary(null));
-  }, [prevMonth, prevYear]);
-
-  useEffect(() => {
-    api.get("/insights", { params: { month, year } })
-      .then((r) => setInsights(r.data?.insights ?? []))
-      .catch(() => setInsights([]));
-  }, [month, year, refresh]);
-
-  useEffect(() => {
-    api.get("/summary/history", { params: { months: 6 } })
-      .then((r) => setHistory(r.data?.months ?? []))
-      .catch(() => setHistory([]));
-  }, [month, year, refresh]);
 
   const todayStr = useMemo(() => new Date().toLocaleDateString("en-CA"), []);
 
