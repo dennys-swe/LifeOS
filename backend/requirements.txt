@@ -29,7 +29,7 @@ http-ece==1.2.1
 httpcore==1.0.9
 httptools==0.7.1
 httpx==0.28.1
-idna==3.15
+idna==3.19
 iniconfig==2.3.0
 Jinja2==3.1.6
 lazy_imports==1.2.0
