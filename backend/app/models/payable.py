@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, Uuid
+from sqlalchemy import Date, ForeignKey, Index, Numeric, String, Uuid
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,12 @@ class PayableStatus(str, Enum):
 
 class Payable(Base):
     __tablename__ = "payables"
+    __table_args__ = (
+        # Issue #133: as consultas mais frequentes (list_payables, get_summary,
+        # get_history, suggest_pending) filtram por range de due_date além de
+        # user_id — ver migration 925d1d5f0368.
+        Index("ix_payables_user_id_due_date", "user_id", "due_date"),
+    )
 
     id: Mapped[Uuid] = mapped_column(Uuid, primary_key=True, default=uuid4)
     user_id: Mapped[Uuid] = mapped_column(
