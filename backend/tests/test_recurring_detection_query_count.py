@@ -8,27 +8,9 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import event
-
 from app.models.transaction import Transaction, TransactionType
 from app.services.recurring_detection_service import detect_recurring_candidates
-
-
-def _count_queries(db_session, fn):
-    engine = db_session.get_bind()
-    statements = []
-
-    def _listener(conn, cursor, statement, parameters, context, executemany):
-        normalized = " ".join(statement.split()).upper()
-        if normalized.startswith("SELECT"):
-            statements.append(statement)
-
-    event.listen(engine, "before_cursor_execute", _listener)
-    try:
-        result = fn()
-    finally:
-        event.remove(engine, "before_cursor_execute", _listener)
-    return result, statements
+from tests.conftest import count_select_queries
 
 
 def _month_date(index: int, day: int = 5) -> dt.date:
@@ -57,11 +39,15 @@ def _seed_months(db_session, user, description: str, months: int) -> None:
 
 def test_detect_recurring_candidates_query_count_does_not_grow_with_volume(db_session, user):
     _seed_months(db_session, user, "ASSINATURA A", 4)
-    _, small = _count_queries(db_session, lambda: detect_recurring_candidates(db_session, user.id))
+    _, small = count_select_queries(
+        db_session, lambda: detect_recurring_candidates(db_session, user.id)
+    )
 
     for i in range(10):
         _seed_months(db_session, user, f"ASSINATURA {i}", 4)
-    _, large = _count_queries(db_session, lambda: detect_recurring_candidates(db_session, user.id))
+    _, large = count_select_queries(
+        db_session, lambda: detect_recurring_candidates(db_session, user.id)
+    )
 
     assert len(small) == len(large)
 

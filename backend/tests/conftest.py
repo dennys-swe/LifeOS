@@ -3,10 +3,11 @@ import sys
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Callable, TypeVar
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -97,6 +98,29 @@ def user(db_session) -> User:
 @pytest.fixture()
 def other_user(db_session) -> User:
     return _make_user(db_session, "outro@example.com")
+
+
+_T = TypeVar("_T")
+
+
+def count_select_queries(db_session, fn: Callable[[], _T]) -> tuple[_T, list[str]]:
+    """Roda `fn()` e devolve `(resultado, lista de SELECTs emitidos)` — usado
+    pelas guardas de contagem de query contra regressão de N+1 (issue #134;
+    ver também `test_sync_n_plus_one.py`, que filtra por um SELECT específico
+    em vez de todos)."""
+    engine = db_session.get_bind()
+    statements: list[str] = []
+
+    def _listener(conn, cursor, statement, parameters, context, executemany):
+        if " ".join(statement.split()).upper().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _listener)
+    try:
+        result = fn()
+    finally:
+        event.remove(engine, "before_cursor_execute", _listener)
+    return result, statements
 
 
 @pytest.fixture()
