@@ -23,7 +23,11 @@ from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate
 from app.services import bill_service
 from app.services.category_rule_service import build_keyword_map
 from app.services.category_seed import seed_default_categories
-from app.services.pluggy_category_map import TRANSFER_CATEGORIES, category_name_for
+from app.services.pluggy_category_map import (
+    OVERRIDABLE_TRANSFER_CATEGORIES,
+    TRANSFER_CATEGORIES,
+    category_name_for,
+)
 from app.services.pluggy_client import get_api_client, pluggy_amount
 from app.services.reconciliation_service import (
     auto_reconcile_confident_matches,
@@ -589,6 +593,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         # dele sobre a classificação automática.
         category_id = None
         rule_is_transfer = False
+        rule_matched = False
         source_of_class: str | None = None
         for keyword, rule in keyword_map.items():
             if keyword in normalized:
@@ -598,6 +603,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                 if resolved is not None:
                     category_id = resolved
                     rule_is_transfer = rule.is_transfer
+                    rule_matched = True
                     source_of_class = ClassificationSource.USER_RULE
                     break
         if category_id is None:
@@ -611,8 +617,17 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                 if category_id is not None:
                     source_of_class = ClassificationSource.PLUGGY
 
+        # Regra do usuário que não é de transferência também vence a categoria
+        # da Pluggy que só *parece* transferência (ex: compra MERCADOLIVRE vem
+        # como `Investments`). Quitação de fatura fica de fora: a descrição e
+        # `Credit card payment` seguem valendo.
+        trust_pluggy_transfer = not (
+            rule_matched
+            and not rule_is_transfer
+            and pluggy_category in OVERRIDABLE_TRANSFER_CATEGORIES
+        )
         transfer_flag = is_transfer(
-            pluggy_category,
+            pluggy_category if trust_pluggy_transfer else None,
             description,
             is_income=(tx_type == TransactionType.INCOME),
             user_full_name=user_full_name,
@@ -622,7 +637,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
             # veio do reconhecimento por descrição, ou da categoria crua.
             source_of_class = (
                 ClassificationSource.PLUGGY
-                if pluggy_category in TRANSFER_CATEGORIES
+                if pluggy_category in TRANSFER_CATEGORIES and trust_pluggy_transfer
                 else ClassificationSource.SYSTEM_RULE
                 if transfer_flag
                 else None
