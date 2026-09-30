@@ -162,14 +162,35 @@ describe("CardLimitsCard — limite consolidado (issue #204)", () => {
     expect(text).toContain("1 cartão(ões) com limite inconsistente");
   });
 
-  it("explica quando nenhum cartão informou o limite", async () => {
+  it("explica quando nenhum cartão tem limite válido para somar", async () => {
     api.get.mockResolvedValue({
       data: summary({ cards: [], cards_counted: 0, cards_without_limit: 1, used_pct: null }),
     });
     renderCard();
 
     expect((await screen.findByTestId("card-limits")).textContent).toContain(
-      "Nenhum cartão informou o limite"
+      "Nenhum cartão com limite válido para somar"
     );
+  });
+
+  it("não some quando os únicos cartões estão ignorados, e explica por quê", async () => {
+    api.get.mockResolvedValue({
+      data: summary({ cards: [], cards_counted: 0, cards_ignored: 2, used_pct: null }),
+    });
+    renderCard();
+
+    const text = (await screen.findByTestId("card-limits")).textContent;
+    expect(text).toContain("2 cartão(ões) marcado(s) como ignorado(s)");
+    expect(text).toContain("Nenhum cartão com limite válido");
+  });
+
+  it("não some quando os únicos cartões têm limite inconsistente, e explica por quê", async () => {
+    api.get.mockResolvedValue({
+      data: summary({ cards: [], cards_counted: 0, cards_inconsistent: 1, used_pct: null }),
+    });
+    renderCard();
+
+    const text = (await screen.findByTestId("card-limits")).textContent;
+    expect(text).toContain("1 cartão(ões) com limite inconsistente");
   });
 });

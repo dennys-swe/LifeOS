@@ -84,8 +84,12 @@ export default function CardLimitsCard() {
       </Card>
     );
   }
-  // Sem cartão com limite informado não há o que mostrar: não ocupa espaço.
-  if (!data || (data.cards_counted === 0 && data.cards_without_limit === 0)) return null;
+  // Só some quando não há cartão nenhum a explicar. Cartão ignorado, sem limite ou
+  // inconsistente fica fora da soma, e o card precisa dizer isso em vez de desaparecer.
+  const hasAnyCard =
+    data &&
+    data.cards_counted + data.cards_without_limit + data.cards_inconsistent + data.cards_ignored > 0;
+  if (!hasAnyCard) return null;
 
   const counted = data.cards.filter((c) => c.status === "ok");
   const tone = usageTone(data.used_pct);
@@ -138,7 +142,7 @@ export default function CardLimitsCard() {
         </>
       ) : (
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          Nenhum cartão informou o limite ainda.
+          Nenhum cartão com limite válido para somar.
         </p>
       )}
 
