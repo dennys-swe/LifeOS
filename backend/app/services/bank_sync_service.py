@@ -23,7 +23,7 @@ from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate
 from app.services import bill_service
 from app.services.category_rule_service import build_keyword_map
 from app.services.category_seed import seed_default_categories
-from app.services.pluggy_category_map import category_name_for, is_transfer
+from app.services.pluggy_category_map import category_name_for
 from app.services.pluggy_client import get_api_client
 from app.services.reconciliation_service import (
     auto_reconcile_confident_matches,
@@ -31,6 +31,7 @@ from app.services.reconciliation_service import (
     drop_resolved_payables,
     suggest_reconciliation,
 )
+from app.services.transaction_signals import is_transfer
 
 logger = logging.getLogger(__name__)
 

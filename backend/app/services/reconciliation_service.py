@@ -12,7 +12,8 @@ from app.models.credit_card_bill import CreditCardBill
 from app.models.payable import Payable, PayableStatus
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.reconciliation import ReconciliationSuggestionResponse
-from app.services.pluggy_category_map import BILL_PAYMENT_DESCRIPTION, CREDIT_CARD_PAYMENT
+from app.services.pluggy_category_map import CREDIT_CARD_PAYMENT
+from app.services.transaction_signals import is_generic_bill_payment_echo, looks_like_bill_payment
 
 DATE_TOLERANCE_DAYS = 7
 
@@ -21,7 +22,6 @@ DATE_TOLERANCE_DAYS = 7
 # MULTIPL", "Pagamento de boleto INT LUIZA MC"), aparece uma segunda transação
 # com um desses textos fixos, no mesmo valor. Não é ambiguidade real: é o
 # mesmo evento contado duas vezes.
-GENERIC_BILL_PAYMENT_ECHOES = {"PAGAMENTO RECEBIDO", "PAGAMENTO COM SALDO"}
 
 
 def _reconcilable(tx: Transaction) -> bool:
@@ -132,10 +132,7 @@ def _is_real_bill_payment(tx: Transaction) -> bool:
     cobrança **futura** já datada no vencimento (parcelamento do Itaú/Luiza),
     o que marcava a fatura como paga antes mesmo do vencimento chegar.
     """
-    return bool(
-        tx.external_category == CREDIT_CARD_PAYMENT
-        or BILL_PAYMENT_DESCRIPTION.search(tx.description or "")
-    )
+    return looks_like_bill_payment(tx.external_category, tx.description)
 
 
 def suggest_reconciliation(
@@ -333,9 +330,7 @@ def _auto_resolve_bill_payments(
             chosen_by_payable[payable_id] = group[0]
         else:
             specific = [
-                s
-                for s in group
-                if s.transaction_description.strip().upper() not in GENERIC_BILL_PAYMENT_ECHOES
+                s for s in group if not is_generic_bill_payment_echo(s.transaction_description)
             ]
             if len(specific) == 1:
                 chosen_by_payable[payable_id] = specific[0]

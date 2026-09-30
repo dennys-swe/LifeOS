@@ -13,9 +13,6 @@ descobrir o que ficou de fora e completar o mapa depois.
 
 from __future__ import annotations
 
-import re
-import unicodedata
-
 CREDIT_CARD_PAYMENT = "Credit card payment"
 
 # Dinheiro que apenas muda de lugar — não é consumo. Excluído dos totais de
@@ -110,111 +107,6 @@ PLUGGY_TO_CATEGORY = {
 # Derivado do conjunto acima em vez de repetido à mão: garante que os dois não
 # saiam de sincronia se uma variação nova de transferência aparecer.
 PLUGGY_TO_CATEGORY.update({nome: "Transferências" for nome in THIRD_PARTY_TRANSFERS})
-
-
-# A Pluggy nem sempre marca a quitação de fatura como `Credit card payment`:
-# nos dados reais do dono, 13 lançamentos "Pagamento de fatura" vieram como
-# `Transfers` genérico. Sem reconhecê-los, a quitação conta como gasto e a
-# mesma grana entra duas vezes — a compra no cartão **e** o pagamento da
-# fatura. Eram R$ 681,10 em jun+jul/2026, 6,4% do gasto do período.
-BILL_PAYMENT_DESCRIPTION = re.compile(r"pagamento\s+(de\s+)?fatura|fatura\s+paga", re.IGNORECASE)
-
-# "Saldo em atraso" é o saldo devedor do rotativo/refinanciamento rolado do
-# mês anterior, não um gasto novo — a compra que o originou já entrou como
-# gasto quando aconteceu. A Pluggy classifica junto com juros/multa/IOF de
-# atraso em "Late payment and overdraft costs" (-> Taxas), e sem distinguir
-# pela descrição essa rolagem conta como Taxas nova todo mês (R$ 456,02 de
-# R$ 501,85 do card "Taxas" em set/2026 era só esse item).
-_OVERDUE_BALANCE_ROLLOVER_DESCRIPTION = re.compile(r"saldo\s+em\s+atraso", re.IGNORECASE)
-
-
-# Lado de **crédito** do pagamento de fatura: a Pluggy não marca esses ecos
-# como `Credit card payment` (só a saída), então entravam como renda. Só vale
-# para entrada — `PAGAMENTO COM SALDO` de saída é compra/pagamento de verdade.
-_INCOME_BILL_PAYMENT_ECHO_DESCRIPTION = re.compile(
-    r"pagamento\s+com\s+saldo|pagamento\s+on\s*-?\s*line", re.IGNORECASE
-)
-
-# Prefixos que a Pluggy/bancos põem antes do nome da contraparte numa entrada.
-_INCOMING_TRANSFER_DESCRIPTION = re.compile(
-    r"pix\s+recebido|transfer[eê]ncia\s+recebida|ted\s+recebid[ao]|doc\s+recebid[ao]",
-    re.IGNORECASE,
-)
-
-# Palavras do texto da descrição que não são parte de nome de pessoa.
-_NON_NAME_TOKENS = {
-    "PIX",
-    "RECEBIDO",
-    "RECEBIDA",
-    "TRANSFERENCIA",
-    "TED",
-    "DOC",
-    "CP",
-    # Conectivos ("PIX RECEBIDO DE DENNYS", "Marcos da Silva"): não são nome.
-    "DE",
-    "DA",
-    "DO",
-    "DAS",
-    "DOS",
-    "E",
-}
-
-
-def _name_tokens(text: str) -> list[str]:
-    """Tokens alfabéticos maiúsculos e sem acento (dígitos/pontuação saem)."""
-    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
-    return re.findall(r"[A-Z]{2,}", ascii_text.upper())
-
-
-def is_self_transfer_description(description: str | None, user_full_name: str | None) -> bool:
-    """Entrada cujo remetente é o próprio usuário (PIX/TED entre contas suas).
-
-    O cadastro e o banco raramente escrevem o nome igual: o banco às vezes manda
-    só o primeiro nome (`PIX RECEBIDO Dennys 04/09`) e às vezes o completo
-    (`...-Dennys Alves Silva`) para quem cadastrou `Dennys Alves`. Vale se:
-    (a) o nome cadastrado aparece inteiro e em sequência na descrição, ou
-    (b) a descrição traz **só** o primeiro nome do usuário.
-    Nome parcial que não seja só o primeiro ("Maria Silva" para quem cadastrou
-    "Maria Alves Silva") fica de fora de propósito: pode ser um parente, e
-    tratá-lo como transferência própria esconderia renda de verdade.
-    """
-    if not description or not user_full_name:
-        return False
-    if not _INCOMING_TRANSFER_DESCRIPTION.search(description):
-        return False
-    user_tokens = [t for t in _name_tokens(user_full_name) if t not in _NON_NAME_TOKENS]
-    if not user_tokens:
-        return False
-    described = [t for t in _name_tokens(description) if t not in _NON_NAME_TOKENS]
-    if not described:
-        return False
-    n = len(user_tokens)
-    if any(described[i : i + n] == user_tokens for i in range(len(described) - n + 1)):
-        return True
-    return described == [user_tokens[0]]
-
-
-def is_transfer(
-    pluggy_category: str | None,
-    description: str | None = None,
-    *,
-    is_income: bool = False,
-    user_full_name: str | None = None,
-) -> bool:
-    if pluggy_category in TRANSFER_CATEGORIES:
-        return True
-    if not description:
-        return False
-    if BILL_PAYMENT_DESCRIPTION.search(description) or _OVERDUE_BALANCE_ROLLOVER_DESCRIPTION.search(
-        description
-    ):
-        return True
-    if is_income:
-        return bool(
-            _INCOME_BILL_PAYMENT_ECHO_DESCRIPTION.search(description)
-            or is_self_transfer_description(description, user_full_name)
-        )
-    return False
 
 
 # Ramo Income da Pluggy (`01xxxxxx`). Nunca esteve mapeado: sem destino de

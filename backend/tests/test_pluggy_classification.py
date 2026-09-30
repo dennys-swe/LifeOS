@@ -22,8 +22,8 @@ from app.services.pluggy_category_map import (
     PLUGGY_TO_CATEGORY,
     TRANSFER_CATEGORIES,
     category_name_for,
-    is_transfer,
 )
+from app.services.transaction_signals import is_transfer
 
 
 def _account(db, user) -> BankAccount:
@@ -719,3 +719,25 @@ def test_sync_nao_conta_eco_como_renda(db_session, user):
     assert by_desc["PAGAMENTO ON LINE"].is_transfer
     assert by_desc["Transferência Recebida|DENNYS ALVES SILVA"].is_transfer
     assert not by_desc["PIX RECEBIDO LARISSA"].is_transfer
+
+
+def test_predicados_de_pagamento_de_fatura_respondem_perguntas_distintas():
+    from app.services.transaction_signals import (
+        is_card_feed_payment_credit,
+        is_generic_bill_payment_echo,
+        looks_like_bill_payment,
+    )
+
+    # Feed do cartão: ampla, ancorada no início.
+    assert is_card_feed_payment_credit(None, "PAGAMENTO COM SALDO")
+    assert is_card_feed_payment_credit("05100000", "qualquer coisa")
+    assert not is_card_feed_payment_credit(None, "JUROS PAGAMENTO CONTAS")
+    # Conciliação: estreita — "PAGAMENTO ANUIDADE" não quita a própria fatura (#103).
+    assert looks_like_bill_payment("Credit card payment", "x")
+    assert looks_like_bill_payment(None, "Pagamento de fatura Itaú")
+    assert not looks_like_bill_payment(None, "PAGAMENTO ANUIDADE")
+    assert not looks_like_bill_payment(None, "PAGAMENTO COM SALDO")
+    # Ecos genéricos não identificam a fatura.
+    for desc in ("PAGAMENTO RECEBIDO", "pagamento com saldo ", "PAGAMENTO ON LINE"):
+        assert is_generic_bill_payment_echo(desc)
+    assert not is_generic_bill_payment_echo("Pagamento de fatura Itaú")
