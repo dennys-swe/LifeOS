@@ -1254,3 +1254,28 @@ def test_open_bill_spike_is_flagged_but_value_is_kept(db_session, user):
 
 def test_open_bill_normal_value_is_not_flagged(db_session, user):
     assert _open_bill_with(db_session, user, 50.0).is_low_confidence is False
+
+
+def test_official_bill_clears_low_confidence_flag(db_session, user):
+    """O banco publica a fatura oficial que substitui a estimativa suspeita:
+    o valor passa a ser do banco, então o sinal de baixa confiança some."""
+    open_bill = _open_bill_with(db_session, user, 2000.0)
+    assert open_bill.is_low_confidence is True
+
+    acc = db_session.get(BankAccount, open_bill.bank_account_id)
+    official = bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        _bill_payload(
+            bill_id="official-1",
+            due_date=_iso(open_bill.due_date),
+            total_amount=1900.0,
+        ),
+        today=date(2026, 9, 5),
+    )
+
+    assert official.id == open_bill.id
+    assert official.is_low_confidence is False
+    assert official.total_amount == Decimal("1900.00")

@@ -257,6 +257,9 @@ def upsert_bill(
         bill.status = status
         bill.due_date = due_date
         bill.total_amount = total_amount
+        # O valor agora vem do banco, não da nossa reconstrução: o "confira"
+        # (#147) valia para a estimativa que acabou de ser substituída.
+        bill.is_low_confidence = False
         bill.minimum_payment_amount = (
             Decimal(str(minimum_payment)) if minimum_payment is not None else None
         )
