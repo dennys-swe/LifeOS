@@ -741,3 +741,42 @@ def test_predicados_de_pagamento_de_fatura_respondem_perguntas_distintas():
     for desc in ("PAGAMENTO RECEBIDO", "pagamento com saldo ", "PAGAMENTO ON LINE"):
         assert is_generic_bill_payment_echo(desc)
     assert not is_generic_bill_payment_echo("Pagamento de fatura Itaú")
+
+
+# --- #167: campos estruturados da Pluggy persistidos + origem da classificação ---
+
+
+def test_sync_persiste_campos_estruturados_da_pluggy(db_session, user):
+    acc = _account(db_session, user)
+    tx = _tx("p1", 120.5, "LOJA X", tipo="DEBIT", category="Shopping")
+    tx["categoryId"] = "08000000"
+    tx["operationType"] = "CARTAO_DE_CREDITO"
+    tx["creditCardMetadata"] = {"installmentNumber": 3, "totalInstallments": 39, "billId": "bill-9"}
+    _sync(db_session, acc, [tx], account_type="CREDIT")
+
+    saved = db_session.query(Transaction).one()
+    assert (saved.installment_number, saved.installment_total) == (3, 39)
+    assert saved.pluggy_category_id == "08000000"
+    assert saved.operation_type == "CARTAO_DE_CREDITO"
+    assert saved.bill_id == "bill-9"
+    assert saved.classification_source == "pluggy"
+
+
+def test_sync_sem_metadado_deixa_campos_nulos(db_session, user):
+    acc = _account(db_session, user)
+    _sync(db_session, acc, [_tx("p2", -10.0, "Sem nada", tipo="DEBIT")])
+
+    saved = db_session.query(Transaction).one()
+    assert saved.installment_number is None
+    assert saved.bill_id is None
+    assert saved.classification_source is None
+
+
+def test_classification_source_distingue_regra_do_usuario_e_sistema(db_session, user):
+    acc = _account(db_session, user)
+    _sync(
+        db_session,
+        acc,
+        [_tx("p3", 5.0, "PAGAMENTO ON LINE", tipo="CREDIT")],
+    )
+    assert db_session.query(Transaction).one().classification_source == "system_rule"

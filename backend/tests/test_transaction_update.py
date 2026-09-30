@@ -96,3 +96,22 @@ def test_cannot_update_another_users_transaction(client, db_session, user, other
 def test_empty_payload_is_rejected(client, db_session, user):
     tx = _transaction(db_session, user)
     assert client.patch(f"/transactions/{tx.id}", json={}).status_code == 400
+
+
+def test_patch_marks_manual_override(client, db_session, user):
+    cat = _category(db_session, user)
+    tx = _transaction(db_session, user, classification_source="pluggy")
+
+    client.patch(f"/transactions/{tx.id}", json={"category_id": str(cat.id)})
+
+    db_session.refresh(tx)
+    assert tx.classification_source == "manual_override"
+
+
+def test_patch_without_classification_fields_keeps_source(client, db_session, user):
+    tx = _transaction(db_session, user, classification_source="pluggy")
+
+    client.patch(f"/transactions/{tx.id}", json={})
+
+    db_session.refresh(tx)
+    assert tx.classification_source == "pluggy"

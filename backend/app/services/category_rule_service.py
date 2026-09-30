@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.category import Category, CategoryKind
 from app.models.category_rule import CategoryRule
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import ClassificationSource, Transaction, TransactionType
 from app.schemas.category_rule import CategoryRuleCreate
 
 
@@ -70,6 +70,10 @@ def apply_rule_to_existing(db: Session, user_id: UUID, rule: CategoryRule) -> in
                 Transaction.type == wanted_type,
                 Transaction.description.ilike(f"%{rule.keyword}%"),
                 needs_update,
+                # Correção manual é travada: regra nova não reescreve (#167).
+                Transaction.classification_source.is_distinct_from(
+                    ClassificationSource.MANUAL_OVERRIDE
+                ),
             )
         )
         .scalars()

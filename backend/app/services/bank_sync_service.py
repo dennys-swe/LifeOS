@@ -17,13 +17,13 @@ from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.models.bank_account import BankAccount, BankAccountSyncStatus
 from app.models.category import Category, CategoryKind
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import ClassificationSource, Transaction, TransactionType
 from app.models.user import User
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate
 from app.services import bill_service
 from app.services.category_rule_service import build_keyword_map
 from app.services.category_seed import seed_default_categories
-from app.services.pluggy_category_map import category_name_for
+from app.services.pluggy_category_map import TRANSFER_CATEGORIES, category_name_for
 from app.services.pluggy_client import get_api_client
 from app.services.reconciliation_service import (
     auto_reconcile_confident_matches,
@@ -534,6 +534,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         # dele sobre a classificação automática.
         category_id = None
         rule_is_transfer = False
+        source_of_class: str | None = None
         for keyword, rule in keyword_map.items():
             if keyword in normalized:
                 resolved = _category_for_direction(
@@ -542,6 +543,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                 if resolved is not None:
                     category_id = resolved
                     rule_is_transfer = rule.is_transfer
+                    source_of_class = ClassificationSource.USER_RULE
                     break
         if category_id is None:
             mapped_name = category_name_for(
@@ -551,6 +553,26 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                 category_id = _category_for_direction(
                     category_ids_by_name.get(mapped_name), tx_type, category_kind_by_id
                 )
+                if category_id is not None:
+                    source_of_class = ClassificationSource.PLUGGY
+
+        transfer_flag = is_transfer(
+            pluggy_category,
+            description,
+            is_income=(tx_type == TransactionType.INCOME),
+            user_full_name=user_full_name,
+        )
+        if source_of_class is None and (transfer_flag or pluggy_category):
+            # Sem regra do usuário nem categoria mapeada: a decisão (se houve)
+            # veio do reconhecimento por descrição, ou da categoria crua.
+            source_of_class = (
+                ClassificationSource.PLUGGY
+                if pluggy_category in TRANSFER_CATEGORIES
+                else ClassificationSource.SYSTEM_RULE
+                if transfer_flag
+                else None
+            )
+        card_meta = tx.get("creditCardMetadata") or {}
 
         new_tx = Transaction(
             user_id=account.user_id,
@@ -562,14 +584,14 @@ def sync_account(db: Session, account: BankAccount) -> dict:
             category_id=category_id,
             # A regra só liga is_transfer, nunca desliga (ver
             # `category_rule_service.apply_rule_to_existing`).
-            is_transfer=rule_is_transfer
-            or is_transfer(
-                pluggy_category,
-                description,
-                is_income=(tx_type == TransactionType.INCOME),
-                user_full_name=user_full_name,
-            ),
+            is_transfer=rule_is_transfer or transfer_flag,
             external_category=(pluggy_category or None),
+            installment_number=card_meta.get("installmentNumber"),
+            installment_total=card_meta.get("totalInstallments"),
+            pluggy_category_id=(tx.get("categoryId") or None),
+            operation_type=(tx.get("operationType") or None),
+            bill_id=(card_meta.get("billId") or None),
+            classification_source=source_of_class,
         )
         db.add(new_tx)
         new_transactions.append(new_tx)

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import ClassificationSource, Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate
 
 
@@ -96,6 +96,10 @@ def update_transaction(db: Session, transaction: Transaction, changes: dict) -> 
     """
     for field, value in changes.items():
         setattr(transaction, field, value)
+    # Correção do usuário trava a classificação contra reprocessamento futuro
+    # (ex: aplicar uma regra ao histórico) — ver `ClassificationSource`.
+    if "category_id" in changes or "is_transfer" in changes:
+        transaction.classification_source = ClassificationSource.MANUAL_OVERRIDE
     db.add(transaction)
     db.commit()
     db.refresh(transaction)

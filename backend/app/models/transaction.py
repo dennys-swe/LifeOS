@@ -3,7 +3,17 @@ from __future__ import annotations
 from enum import Enum
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, ForeignKey, Index, Numeric, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    Boolean,
+    Date,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,6 +23,21 @@ from app.db.database import Base
 class TransactionType(str, Enum):
     INCOME = "INCOME"
     EXPENSE = "EXPENSE"
+
+
+class ClassificationSource:
+    """De onde veio a categoria/`is_transfer` da transação (issue #167).
+
+    Precedência de decisão, da mais forte para a mais fraca: `MANUAL_OVERRIDE`
+    (correção do usuário, travada contra reprocessamento) > `USER_RULE` >
+    `PLUGGY` (categoria/campos estruturados) > `SYSTEM_RULE` (regex do sistema).
+    `None` = transação anterior a esse campo, origem desconhecida.
+    """
+
+    MANUAL_OVERRIDE = "manual_override"
+    USER_RULE = "user_rule"
+    PLUGGY = "pluggy"
+    SYSTEM_RULE = "system_rule"
 
 
 class Transaction(Base):
@@ -55,5 +80,13 @@ class Transaction(Base):
     category_id: Mapped[Uuid | None] = mapped_column(
         Uuid, ForeignKey("categories.id"), nullable=True
     )
+    # Campos estruturados da Pluggy que o sync antes descartava (#167). O Inter,
+    # por exemplo, manda 39 parcelas só aqui, sem "X/Y" na descrição.
+    installment_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    installment_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pluggy_category_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    operation_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    bill_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    classification_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     category = relationship("Category", back_populates="transactions")

@@ -48,3 +48,6 @@ class TransactionResponse(TransactionBase):
     # diferente do card ao lado.
     is_transfer: bool = False
     external_category: Optional[str] = None
+    installment_number: Optional[int] = None
+    installment_total: Optional[int] = None
+    classification_source: Optional[str] = None
