@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 import CardLimitsCard from "../components/dashboard/CardLimitsCard";
+import DataQualityBanner from "../components/dashboard/DataQualityBanner";
 import CategorySpendList from "../components/dashboard/CategorySpendList";
 import InsightCard from "../components/dashboard/InsightCard";
 import MonthNavigator from "../components/MonthNavigator";
@@ -291,6 +292,8 @@ export default function DashboardPage({ month, year, onMonthChange }) {
           </div>
         )}
 
+        <DataQualityBanner />
+
         <CardLimitsCard />
 
         {/* Super Efficient Grid: Gasto por Categoria + Faturas de Cartão */}
@@ -386,6 +389,14 @@ export default function DashboardPage({ month, year, onMonthChange }) {
                               Vence em {new Date(`${bill.due_date}T00:00:00`).toLocaleDateString("pt-BR")}
                             </p>
                             <BillStatusBadge status={bill.status} />
+                            {bill.is_low_confidence && (
+                              <span
+                                title="O valor estimado desta fatura destoa muito da anterior. Confira com o banco; uma compra grande de verdade também dispara este aviso."
+                                className="inline-flex flex-shrink-0 rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-600 dark:text-rose-400"
+                              >
+                                Confira o valor
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

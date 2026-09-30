@@ -18,6 +18,7 @@ const PayablesPage = lazy(() => import("./pages/PayablesPage"));
 const TransactionsPage = lazy(() => import("./pages/TransactionsPage"));
 const BankAccountsPage = lazy(() => import("./pages/BankAccountsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const DataQualityPage = lazy(() => import("./pages/DataQualityPage"));
 
 function DashboardRoute() {
   const { month, year, onMonthChange } = useOutletContext();
@@ -60,6 +61,7 @@ export default function App() {
                 <Route path="/payables" element={<PayablesRoute />} />
                 <Route path="/transactions" element={<TransactionsRoute />} />
                 <Route path="/banks" element={<BankAccountsPage />} />
+                <Route path="/data-quality" element={<DataQualityPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Route>
 
