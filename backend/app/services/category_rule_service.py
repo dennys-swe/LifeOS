@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.category import Category, CategoryKind
 from app.models.category_rule import CategoryRule
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import ClassificationSource, Transaction, TransactionType
 from app.schemas.category_rule import CategoryRuleCreate
 
 
@@ -70,6 +70,10 @@ def apply_rule_to_existing(db: Session, user_id: UUID, rule: CategoryRule) -> in
                 Transaction.type == wanted_type,
                 Transaction.description.ilike(f"%{rule.keyword}%"),
                 needs_update,
+                # Correção manual é travada: regra nova não reescreve (#167).
+                Transaction.classification_source.is_distinct_from(
+                    ClassificationSource.MANUAL_OVERRIDE
+                ),
             )
         )
         .scalars()
@@ -78,6 +82,7 @@ def apply_rule_to_existing(db: Session, user_id: UUID, rule: CategoryRule) -> in
 
     for transaction in matched:
         transaction.category_id = rule.category_id
+        transaction.classification_source = ClassificationSource.USER_RULE
         # Só liga is_transfer, nunca desliga: a regra pode reconhecer um caso
         # a mais (ex: pessoa específica) que `pluggy_category_map` não sabe,
         # mas não deve desfazer uma transferência que a Pluggy já identificou

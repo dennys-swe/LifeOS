@@ -323,3 +323,26 @@ def test_build_keyword_map_carries_is_transfer(db_session, user):
     )
     kmap = build_keyword_map(db_session, user.id)
     assert kmap["NOIVA"].is_transfer is True
+
+
+def test_rule_does_not_overwrite_manual_override(db_session, user):
+    """Correção manual é travada: aplicar regra ao histórico não a desfaz (#167)."""
+    mercado = _cat(db_session, user, "Mercado")
+    manual = _tx(db_session, user, "CONVENIENCIA POSTO")
+    manual.classification_source = "manual_override"
+    outra = _tx(db_session, user, "CONVENIENCIA CENTRO")
+    db_session.commit()
+
+    rule = create_rule(
+        db_session,
+        user.id,
+        CategoryRuleCreate(keyword="CONVENIENCIA", category_id=mercado.id, priority=0),
+    )
+
+    assert apply_rule_to_existing(db_session, user.id, rule) == 1
+    db_session.refresh(manual)
+    db_session.refresh(outra)
+    assert manual.category_id is None
+    assert outra.category_id == mercado.id
+    assert outra.classification_source == "user_rule"
+    assert manual.classification_source == "manual_override"
