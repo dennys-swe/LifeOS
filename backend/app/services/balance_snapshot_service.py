@@ -80,12 +80,13 @@ def record_snapshot(
     if balance is None and credit_limit is None and available is None:
         return None
 
+    currency = getattr(pluggy_account, "currency_code", None)
     now = now or _now()
     last = latest_snapshot(db, user_id, pluggy_account.id)
     if (
         last is not None
-        and (last.balance, last.credit_limit, last.available_credit_limit)
-        == (balance, credit_limit, available)
+        and (last.balance, last.credit_limit, last.available_credit_limit, last.currency)
+        == (balance, credit_limit, available, currency)
         and now - last.captured_at < UNCHANGED_SNAPSHOT_INTERVAL
     ):
         return None
@@ -98,7 +99,7 @@ def record_snapshot(
         balance=balance,
         credit_limit=credit_limit,
         available_credit_limit=available,
-        currency=getattr(pluggy_account, "currency_code", None),
+        currency=currency,
         captured_at=now,
     )
     db.add(snapshot)

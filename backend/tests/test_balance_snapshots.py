@@ -139,6 +139,19 @@ def test_changed_values_record_immediately(db_session, user):
     assert [r.balance for r in _rows(db_session)] == [Decimal("100.00"), Decimal("80.00")]
 
 
+def test_currency_change_records_even_with_same_values(db_session, user):
+    acc = _bank_account(db_session, user)
+    snap = balance_snapshot_service.record_snapshot
+    brl = _bank(100)
+    usd = SimpleNamespace(id=brl.id, type="BANK", balance=100, currency_code="USD")
+
+    snap(db_session, user.id, acc.id, brl, now=T0)
+    db_session.commit()
+    changed = snap(db_session, user.id, acc.id, usd, now=T0 + timedelta(minutes=5))
+
+    assert changed is not None and changed.currency == "USD"
+
+
 def test_history_is_isolated_between_users(db_session, user, other_user):
     """Mesmo `pluggy_account_id` em usuários diferentes não se enxerga."""
     acc_a = _bank_account(db_session, user)
