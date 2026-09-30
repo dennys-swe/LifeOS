@@ -88,5 +88,11 @@ class Transaction(Base):
     operation_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     bill_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     classification_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # De qual cartão/conta veio (#184). `card_label` = "<nome> ••<final>" quando a
+    # Pluggy manda `cardNumber` (Itaú Múltiplo junta vários cartões numa mesma
+    # `accountId`, então só o id da conta não separa); só o nome quando não manda
+    # (Inter). Transação manual e anterior a esse campo ficam NULL.
+    card_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    pluggy_account_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     category = relationship("Category", back_populates="transactions")

@@ -780,3 +780,31 @@ def test_classification_source_distingue_regra_do_usuario_e_sistema(db_session, 
         [_tx("p3", 5.0, "PAGAMENTO ON LINE", tipo="CREDIT")],
     )
     assert db_session.query(Transaction).one().classification_source == "system_rule"
+
+
+# --- #184: selo de cartão ---
+
+
+def test_card_label_com_e_sem_final():
+    from app.services.bank_sync_service import _card_label
+
+    assert _card_label("Itaú Click", "6920") == "Itaú Click ••6920"
+    assert _card_label("Itaú Click", "5555666677776920") == "Itaú Click ••6920"
+    assert _card_label("Inter", None) == "Inter"
+    assert _card_label(None, None) is None
+
+
+def test_sync_grava_selo_de_cartao_por_final(db_session, user):
+    acc = _account(db_session, user)
+    a = _tx("c1", 10.0, "LOJA A", tipo="DEBIT")
+    a["creditCardMetadata"] = {"cardNumber": "6920"}
+    b = _tx("c2", 20.0, "LOJA B", tipo="DEBIT")
+    b["creditCardMetadata"] = {"cardNumber": "9420"}
+    c = _tx("c3", 30.0, "LOJA C", tipo="DEBIT")
+    _sync(db_session, acc, [a, b, c], account_type="CREDIT")
+
+    by_desc = {t.description: t for t in db_session.query(Transaction).all()}
+    assert by_desc["LOJA A"].card_label == "conta ••6920"
+    assert by_desc["LOJA B"].card_label == "conta ••9420"
+    assert by_desc["LOJA C"].card_label == "conta"
+    assert by_desc["LOJA A"].pluggy_account_id == by_desc["LOJA C"].pluggy_account_id

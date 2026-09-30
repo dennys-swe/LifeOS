@@ -49,6 +49,7 @@ def list_transactions(
     category_id: Optional[UUID] = None,
     uncategorized: bool = False,
     include_transfers: bool = True,
+    card: Optional[str] = Query(default=None, max_length=120),
     limit: Optional[int] = Query(default=None, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -63,6 +64,7 @@ def list_transactions(
         category_id=category_id,
         uncategorized=uncategorized,
         include_transfers=include_transfers,
+        card=card,
         limit=limit,
         offset=offset,
     )

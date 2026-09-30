@@ -116,3 +116,28 @@ def test_filters_still_isolate_users(client, db_session, user, other_user):
     data = client.get(f"/transactions?month=7&year=2026&category_id={dele.id}").json()
 
     assert data == []
+
+
+def test_filter_by_card(client, db_session, user):
+    from datetime import date
+    from decimal import Decimal
+
+    from app.models.transaction import Transaction, TransactionType
+
+    for desc, label in (("A", "Itaú ••6920"), ("B", "Itaú ••9420"), ("C", None)):
+        db_session.add(
+            Transaction(
+                user_id=user.id,
+                date=date(2026, 8, 1),
+                description=desc,
+                amount=Decimal("10"),
+                type=TransactionType.EXPENSE,
+                card_label=label,
+            )
+        )
+    db_session.commit()
+
+    response = client.get("/transactions", params={"card": "Itaú ••6920"})
+
+    assert [t["description"] for t in response.json()] == ["A"]
+    assert response.json()[0]["card_label"] == "Itaú ••6920"
