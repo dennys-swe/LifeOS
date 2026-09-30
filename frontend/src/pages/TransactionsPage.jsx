@@ -121,11 +121,15 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
     [transactions],
   );
 
+  // Filtro que não existe mais nas opções (troca de mês) é ignorado: o select
+  // some com <2 cartões e o usuário não teria como limpá-lo.
+  const activeCard = cardOptions.includes(cardFilter) ? cardFilter : "all";
+
   const filtered = useMemo(() => {
     let list = transactions;
 
-    if (cardFilter !== "all") {
-      list = list.filter((t) => t.card_label === cardFilter);
+    if (activeCard !== "all") {
+      list = list.filter((t) => t.card_label === activeCard);
     }
 
     if (typeFilter === "TRANSFERS") {
@@ -144,7 +148,7 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
       list = list.filter((t) => t.description.toLowerCase().includes(q));
     }
     return list.sort((a, b) => b.date.localeCompare(a.date));
-  }, [transactions, typeFilter, hideTransfers, search, cardFilter]);
+  }, [transactions, typeFilter, hideTransfers, search, activeCard]);
 
   const realExpensesSum = useMemo(
     () =>
@@ -228,7 +232,7 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
 
             {cardOptions.length > 1 && (
               <select
-                value={cardFilter}
+                value={activeCard}
                 onChange={(e) => setCardFilter(e.target.value)}
                 aria-label="Filtrar por cartão"
                 className="rounded-full border border-slate-200/80 bg-white px-3 py-1.5 font-display text-xs font-bold text-slate-600 outline-none focus:border-emerald-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
