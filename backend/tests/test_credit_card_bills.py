@@ -1190,3 +1190,92 @@ def test_endpoint_pending_focus_param(client, db_session, user):
 
 def test_endpoint_pending_focus_requires_month_and_year(client):
     assert client.get("/credit-card-bills", params={"pending_focus": True}).status_code == 422
+
+
+# --- guardrail de sanidade da fatura em aberto (#147) ---
+
+
+def test_assess_open_bill_confidence_rules():
+    from app.services.open_bill_service import assess_open_bill_confidence as assess
+
+    d = Decimal
+    # razoável
+    assert assess(d("900"), d("850"), 5) is None
+    # menor que a anterior é normal no começo do ciclo — nunca sinaliza
+    assert assess(d("50"), d("850"), 5) is None
+    # disparo: >2x E diferença relevante
+    assert assess(d("2000"), d("850"), 5) == "spike"
+    # >2x mas diferença pequena (ruído em valor baixo) não sinaliza
+    assert assess(d("60"), d("20"), 5) is None
+    # zerou: só suspeito com anterior relevante e ciclo já avançado
+    assert assess(d("0"), d("850"), 20) == "zeroed"
+    assert assess(d("0"), d("850"), 5) is None
+    assert assess(d("0"), d("30"), 20) is None
+    # sem fatura anterior de referência
+    assert assess(d("500"), d("0"), 20) is None
+
+
+def _open_bill_with(db_session, user, tx_amount):
+    # Datas fixas + `today` injetado: o ciclo aberto não depende do calendário real.
+    today = date(2026, 9, 5)
+    acc = _make_account(db_session, user)
+    bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        _bill_payload(bill_id="closed-1", due_date=_iso(date(2026, 8, 20)), total_amount=850.0),
+    )
+    return bill_service.upsert_open_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        [
+            {
+                "id": "tx-1",
+                "amount": tx_amount,
+                "description": "compra",
+                "date": _iso(date(2026, 8, 10)),
+                "type": "DEBIT",
+                "status": "PENDING",
+            }
+        ],
+        today=today,
+    )
+
+
+def test_open_bill_spike_is_flagged_but_value_is_kept(db_session, user):
+    bill = _open_bill_with(db_session, user, 2000.0)
+
+    assert bill.is_low_confidence is True
+    assert bill.total_amount == Decimal("2000.00")
+
+
+def test_open_bill_normal_value_is_not_flagged(db_session, user):
+    assert _open_bill_with(db_session, user, 50.0).is_low_confidence is False
+
+
+def test_official_bill_clears_low_confidence_flag(db_session, user):
+    """O banco publica a fatura oficial que substitui a estimativa suspeita:
+    o valor passa a ser do banco, então o sinal de baixa confiança some."""
+    open_bill = _open_bill_with(db_session, user, 2000.0)
+    assert open_bill.is_low_confidence is True
+
+    acc = db_session.get(BankAccount, open_bill.bank_account_id)
+    official = bill_service.upsert_bill(
+        db_session,
+        user.id,
+        acc,
+        "pluggy-acc-1",
+        _bill_payload(
+            bill_id="official-1",
+            due_date=_iso(open_bill.due_date),
+            total_amount=1900.0,
+        ),
+        today=date(2026, 9, 5),
+    )
+
+    assert official.id == open_bill.id
+    assert official.is_low_confidence is False
+    assert official.total_amount == Decimal("1900.00")

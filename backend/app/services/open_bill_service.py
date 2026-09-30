@@ -303,3 +303,31 @@ def next_due_date(last_closed_due_date: date, today: Optional[date] = None) -> d
         candidate = date(year, month, day)
         if candidate >= today:
             return candidate
+
+
+# Guardrail de sanidade (#147): a fatura aberta é uma soma por heurística e nada
+# a comparava com a realidade. Só sinaliza — não altera o valor. Só olha para
+# CIMA (disparo) e para o zero: a fatura aberta naturalmente é menor que a
+# anterior no início do ciclo, então "menor" sozinho não é sinal de problema.
+SPIKE_RATIO = Decimal("2")  # calculada > 2x a fechada anterior...
+SPIKE_MIN_DELTA = Decimal("100")  # ...e a diferença passa de R$ 100 (evita ruído em valor pequeno)
+ZERO_MIN_PREVIOUS = Decimal("100")  # zerar só é suspeito se a anterior foi relevante...
+ZERO_MIN_DAYS_AFTER_PREVIOUS_DUE = 15  # ...e o ciclo já teve tempo de acumular gasto
+
+
+def assess_open_bill_confidence(
+    computed: Decimal, previous_closed: Decimal, days_since_previous_due: int
+) -> Optional[str]:
+    """`None` se o valor parece razoável; senão o motivo ("spike" ou "zeroed")."""
+    if previous_closed <= 0:
+        return None
+    if computed == 0:
+        if (
+            previous_closed >= ZERO_MIN_PREVIOUS
+            and days_since_previous_due >= ZERO_MIN_DAYS_AFTER_PREVIOUS_DUE
+        ):
+            return "zeroed"
+        return None
+    if computed > previous_closed * SPIKE_RATIO and computed - previous_closed >= SPIKE_MIN_DELTA:
+        return "spike"
+    return None
