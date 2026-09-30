@@ -58,6 +58,7 @@ IA é a camada de cima (entender, explicar, conversar). Ela nunca é a fonte de 
 | **Conciliação de saldo e checagem de invariantes** | **não existe [NOVO]** |
 | **Enriquecimento de todas as transações (nome limpo)** | **não existe [NOVO]** |
 | **Motor de alertas com deduplicação e preferências** | **não existe [NOVO]** |
+| **Limite consolidado dos cartões (usado/disponível)** | não existe [NOVO] |
 | **Metas** (BACKLOG #3) | não existe |
 | **Perguntas em linguagem natural** | não existe [NOVO] |
 
@@ -91,10 +92,10 @@ Cada item traz: escopo, design, testes, aceite, dependência e **modelo sugerido
 - Modelo: Sonnet (captura e análise); Haiku para o scrub.
 
 **A2 — Persistir saldo (snapshots) [NOVO]**
-- Tabela `account_balance_snapshots` (`id`, `user_id`, `bank_account_id`, `pluggy_account_id`, `balance`, `currency`, `captured_at`, `source`). Índice `(bank_account_id, captured_at)`.
-- O sync grava um snapshot por conta de tipo BANK por execução. Retenção: 1 por dia depois de 90 dias.
+- Tabela `account_balance_snapshots` (`id`, `user_id`, `bank_account_id`, `pluggy_account_id`, `balance`, `credit_limit`, `available_credit_limit`, `currency`, `captured_at`, `source`). As duas colunas de limite são nulas para conta corrente e preenchidas para cartão (B6). Índice `(bank_account_id, captured_at)`.
+- O sync grava um snapshot por conta (BANK e CREDIT) por execução. Retenção: 1 por dia depois de 90 dias.
 - Migration escrita à mão e validada contra o Postgres do docker-compose (não só SQLite).
-- Testes: grava snapshot; idempotência por sync; isolamento entre usuários; conta de cartão não gera snapshot de saldo.
+- Testes: grava snapshot; idempotência por sync; isolamento entre usuários; conta de cartão grava limite e não grava saldo de conta corrente.
 - Modelo: Haiku (model/schema/migration), Sonnet (hook no sync).
 
 **A3 — Conciliação de ingestão [NOVO]**
@@ -142,6 +143,7 @@ Cada item traz: escopo, design, testes, aceite, dependência e **modelo sugerido
 - Para o perfil cartão (prioritário): `folga_no_ciclo = saldo projetado no vencimento da fatura − fatura projetada no vencimento`.
   - **Saldo projetado** = saldo das contas correntes hoje (A2) + entradas conservadoras até o vencimento (B3) − outros compromissos até lá (payables, recorrentes).
   - **Fatura projetada** = fatura aberta atual (`open_bill_service`) + parcelas já comprometidas que caem nesse ciclo (B1) + gasto esperado até o fechamento pelo ritmo do usuário.
+  - O valor mostrado é `min(folga_no_ciclo, limite disponível do B6)`.
   - Resposta ao usuário: *"Você ainda pode gastar R$ X no cartão até o fechamento (dia D) e pagar a fatura sem usar o rotativo."* Negativo vira alerta (C1), não só número vermelho.
 - Para conta corrente: `livre = Σ saldo das contas correntes (A2) − compromissos até a próxima entrada esperada (B1)`. Investimento e conta de cartão ficam fora.
 - Endpoint `GET /planning/safe-to-spend` retorna `folga_no_ciclo`, `livre_conta`, `fechamento`, `vencimento`, `itens` e `confianca`. A confiança é rebaixada se houver divergência A3, fatura estimada (`is_low_confidence`) ou snapshot velho.
@@ -162,6 +164,17 @@ Cada item traz: escopo, design, testes, aceite, dependência e **modelo sugerido
 - Cuidado: parcelas futuras dentro da fatura futura não podem ser contadas de novo (mesma regra de dupla contagem do B1). Itaú emite as parcelas futuras; Nubank só a do ciclo corrente.
 - Testes: virada de ciclo, compra no dia do fechamento, parcela que cruza ciclos, cartão sem `cardNumber` (Inter), dois cartões no mesmo item.
 - Depende de A1 (datas de fechamento e vencimento) e B1. Modelo: Sonnet; Opus revisa.
+
+**B6 — Limite consolidado dos cartões [NOVO]**
+- Somar os limites de todos os cartões e mostrar **limite total, usado, disponível e % usado**, por cartão e no total. Ideia do dono.
+- **Somar por conta da Pluggy (`pluggy_account_id`), não por cartão.** O Itaú Múltiplo junta vários cartões numa `accountId`; somar por cartão contaria o mesmo limite duas vezes. O `card_label` (#184) serve só para exibição.
+- **Usado = `creditLimit − availableCreditLimit`** quando o banco entrega os dois. Não usar `balance` às cegas: a semântica varia por banco. No Nubank, `balance` inclui o ciclo seguinte e as parcelas ainda não cobradas, o que para **limite** é até o correto (parcela futura consome limite), mas para **fatura** não é. O A1 confirma, por banco, quais campos vêm e o que significam.
+- **Usado de limite ≠ valor da fatura:** o limite usado inclui parcelas futuras e compras de ciclos seguintes. A tela deve deixar isso claro para não parecer divergência.
+- Mostrar a **idade do dado** (último snapshot) e ocultar o número se o banco não entregar limite (Inter pode não entregar), em vez de mostrar zero.
+- Integra com o B2: o quanto ainda dá para gastar no cartão é `min(folga_no_ciclo, limite disponível)`. Alerta (C1) quando o limite usado passa de um percentual configurável.
+- Endpoint `GET /cards/limits`: lista por conta + total + `confianca` + `captured_at`.
+- Testes: dois cartões em contas distintas (soma); dois cartões na mesma conta (não duplica); banco sem limite (omite); limite disponível maior que o total (dado inconsistente, rebaixa confiança); snapshot velho; isolamento de usuário.
+- Depende de A1 e A2. O BACKLOG já registrava esse card ("limite usado/disponível por cartão"). Modelo: Haiku para o card de UI; Sonnet para o serviço.
 
 **B4 — UI do Home [#155–#160, #158, #189]**
 - Uma tela: **livre agora**, o que vence nos próximos 7 dias, um alerta. Linha do tempo de 30/60 dias abaixo. Mobile primeiro.
