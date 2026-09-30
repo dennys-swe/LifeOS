@@ -28,6 +28,10 @@ TRANSFER_CATEGORIES = {
     "Fixed income",
 }
 
+# Quitação de fatura não é discutível por regra de keyword; as demais, sim
+# (a Pluggy manda compra do Mercado Livre como `Investments`).
+OVERRIDABLE_TRANSFER_CATEGORIES = TRANSFER_CATEGORIES - {CREDIT_CARD_PAYMENT}
+
 # Transferência para terceiros (PIX, TED, boleto) **é** gasto — o dinheiro saiu
 # de vez. Não entra em TRANSFER_CATEGORIES, mas também não é consumo, então tem
 # categoria própria em vez de ficar sem nenhuma (eram ~21% das transações).

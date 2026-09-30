@@ -205,6 +205,49 @@ def test_investment_is_transfer_not_expense(db_session, user):
     assert db_session.query(Transaction).one().is_transfer is True
 
 
+def _rule(db, user, keyword, category_name, **kw):
+    from app.schemas.category_rule import CategoryRuleCreate
+    from app.services.category_rule_service import create_rule
+    from app.services.category_seed import seed_default_categories
+
+    seed_default_categories(db, user.id)
+    cat = db.query(Category).filter(Category.name == category_name).one()
+    create_rule(
+        db, user.id, CategoryRuleCreate(keyword=keyword, category_id=cat.id, priority=10, **kw)
+    )
+    return cat
+
+
+def test_user_rule_overrides_investments_transfer_flag(db_session, user):
+    """Compra MERCADOLIVRE vem da Pluggy como `Investments`; a regra do usuário
+    a torna gasto de verdade."""
+    acc = _account(db_session, user)
+    compras = _rule(db_session, user, "MERCADOLIVRE", "Compras")
+
+    _sync(
+        db_session,
+        acc,
+        [_tx("t1", -38.24, "MERCADOLIVRE MERCADOL VARGEM", tipo="DEBIT", category="Investments")],
+    )
+
+    tx = db_session.query(Transaction).one()
+    assert tx.category_id == compras.id
+    assert tx.is_transfer is False
+
+
+def test_user_rule_does_not_override_credit_card_payment(db_session, user):
+    acc = _account(db_session, user)
+    _rule(db_session, user, "ITAU", "Taxas")
+
+    _sync(
+        db_session,
+        acc,
+        [_tx("t1", -500.0, "ITAU pagamento", tipo="DEBIT", category="Credit card payment")],
+    )
+
+    assert db_session.query(Transaction).one().is_transfer is True
+
+
 # ---------------------------------------------------------------------------
 # Categoria: aproveita a classificação que a Pluggy já entrega
 # ---------------------------------------------------------------------------
