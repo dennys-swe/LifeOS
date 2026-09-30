@@ -1,3 +1,4 @@
+from app.models.account_balance_snapshot import AccountBalanceSnapshot
 from app.models.bank_account import BankAccount
 from app.models.budget import Budget
 from app.models.category import Category
@@ -11,6 +12,7 @@ from app.models.transaction import Transaction
 from app.models.user import User
 
 __all__ = [
+    "AccountBalanceSnapshot",
     "BankAccount",
     "Budget",
     "Category",

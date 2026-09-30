@@ -20,7 +20,7 @@ from app.models.category import Category, CategoryKind
 from app.models.transaction import ClassificationSource, Transaction, TransactionType
 from app.models.user import User
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate
-from app.services import bill_service
+from app.services import balance_snapshot_service, bill_service
 from app.services.category_rule_service import build_keyword_map
 from app.services.category_seed import seed_default_categories
 from app.services.pluggy_category_map import (
@@ -438,6 +438,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
             if pluggy_acct.id in ignored_pluggy_account_ids:
                 continue
             seen_pluggy_account_ids.add(pluggy_acct.id)
+            balance_snapshot_service.record_snapshot(db, account.user_id, account.id, pluggy_acct)
             is_credit = getattr(pluggy_acct, "type", None) == "CREDIT"
             card_name = getattr(pluggy_acct, "marketing_name", None) or getattr(
                 pluggy_acct, "name", None
