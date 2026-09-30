@@ -44,8 +44,16 @@ _OVERDUE_BALANCE_ROLLOVER_DESCRIPTION = re.compile(r"saldo\s+em\s+atraso", re.IG
 # Lado de **crédito** do pagamento de fatura: a Pluggy não marca esses ecos
 # como `Credit card payment` (só a saída), então entravam como renda. Só vale
 # para entrada — `PAGAMENTO COM SALDO` de saída é compra/pagamento de verdade.
+#
+# Também entram os créditos internos de cartão: `Crédito liberado para Pix` (o cartão
+# financiando um Pix, #199) e `Valor adicionado na conta por cartão de crédito` (recarga).
+# O dinheiro não é novo; o gasto de verdade está do lado do cartão ou no Pix que sai.
+# `cart\S{1,2}o` tolera "cartão" com o til composto ou decomposto.
 _INCOME_BILL_PAYMENT_ECHO_DESCRIPTION = re.compile(
-    r"pagamento\s+com\s+saldo|pagamento\s+on\s*-?\s*line", re.IGNORECASE
+    r"pagamento\s+com\s+saldo|pagamento\s+on\s*-?\s*line"
+    r"|cr[eé]dito\s+liberado\s+para\s+pix"
+    r"|valor\s+adicionado\s+na\s+conta\s+por\s+cart\S{1,2}o",
+    re.IGNORECASE,
 )
 
 # Prefixos que a Pluggy/bancos põem antes do nome da contraparte numa entrada.
