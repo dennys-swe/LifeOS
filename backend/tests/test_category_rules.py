@@ -344,3 +344,5 @@ def test_rule_does_not_overwrite_manual_override(db_session, user):
     db_session.refresh(outra)
     assert manual.category_id is None
     assert outra.category_id == mercado.id
+    assert outra.classification_source == "user_rule"
+    assert manual.classification_source == "manual_override"

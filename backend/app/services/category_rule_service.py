@@ -82,6 +82,7 @@ def apply_rule_to_existing(db: Session, user_id: UUID, rule: CategoryRule) -> in
 
     for transaction in matched:
         transaction.category_id = rule.category_id
+        transaction.classification_source = ClassificationSource.USER_RULE
         # Só liga is_transfer, nunca desliga: a regra pode reconhecer um caso
         # a mais (ex: pessoa específica) que `pluggy_category_map` não sabe,
         # mas não deve desfazer uma transferência que a Pluggy já identificou
