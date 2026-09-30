@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -37,6 +38,77 @@ def list_bills(
 
     result = db.execute(query.order_by(CreditCardBill.due_date.asc()))
     return result.scalars().all()
+
+
+def _today_in_brazil() -> date:
+    """Hoje no fuso do usuário. O servidor roda em UTC: entre 21h e 23h59 do
+    último dia do mês ele já estaria no mês seguinte."""
+    try:
+        return datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    except ZoneInfoNotFoundError:  # sem tzdata no ambiente
+        return date.today()
+
+
+def list_bills_pending_focus(
+    db: Session,
+    user_id: UUID,
+    month: int,
+    year: int,
+    today: Optional[date] = None,
+) -> List[CreditCardBill]:
+    """Faturas do dashboard: no **mês atual**, a paga dá lugar à próxima do cartão.
+
+    Depois de quitada, a fatura do mês deixa de ser o que pede atenção — e ficava
+    na tela quase o mês inteiro. Só vale para o mês corrente: em mês passado ou
+    futuro o card continua sendo histórico/planejamento. Sem próxima fatura do
+    mesmo cartão (ex: ainda não emitida), a paga continua aparecendo.
+    """
+    today = today or _today_in_brazil()
+    bills = list_bills(db, user_id, month=month, year=year)
+    if (month, year) != (today.month, today.year):
+        return bills
+
+    payable_ids = [b.payable_id for b in bills if b.payable_id is not None]
+    if not payable_ids:
+        return bills
+    paid_payable_ids = set(
+        db.execute(
+            select(Payable.id).where(
+                Payable.id.in_(payable_ids), Payable.status == PayableStatus.PAID
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not paid_payable_ids:
+        return bills
+
+    next_start = _first_day_of_next_month(date(year, month, 1))
+    next_end = date(
+        next_start.year, next_start.month, monthrange(next_start.year, next_start.month)[1]
+    )
+    next_by_card: dict[str, CreditCardBill] = {}
+    for nxt in db.execute(
+        select(CreditCardBill)
+        .where(
+            CreditCardBill.user_id == user_id,
+            CreditCardBill.due_date >= next_start,
+            CreditCardBill.due_date <= next_end,
+        )
+        .order_by(CreditCardBill.due_date.asc())
+    ).scalars():
+        next_by_card.setdefault(nxt.pluggy_account_id, nxt)
+
+    result: List[CreditCardBill] = []
+    seen: set = set()
+    for b in bills:
+        chosen = b
+        if b.payable_id in paid_payable_ids and b.pluggy_account_id in next_by_card:
+            chosen = next_by_card[b.pluggy_account_id]
+        if chosen.id not in seen:
+            seen.add(chosen.id)
+            result.append(chosen)
+    return result
 
 
 def _first_day_of_next_month(d: date) -> date:

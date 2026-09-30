@@ -141,7 +141,8 @@ export function FinanceProvider({ children, month, year, needsDashboardData = fa
           ? [
               api.get("/payables/upcoming", { params: { days: 7 } }).catch(() => ({ data: [] })),
               api
-                .get("/credit-card-bills", { params: { month: m, year: y } })
+                // pending_focus: no mês atual, fatura paga dá lugar à próxima do cartão.
+                .get("/credit-card-bills", { params: { month: m, year: y, pending_focus: true } })
                 .catch(() => ({ data: [] })),
               api
                 .get("/summary", { params: { month: pm, year: py } })
