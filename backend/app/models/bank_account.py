@@ -39,3 +39,13 @@ class BankAccount(Base):
         default=BankAccountSyncStatus.IDLE,
     )
     last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Estado do *item* na Pluggy (#214), lido a cada sync. `last_sync_at` diz quando o
+    # LifeOS leu a Pluggy; estes dizem quando a Pluggy leu o **banco**. Um item pode ficar
+    # dias sem atualizar (ex: `next_auto_sync_at` nulo) com `last_sync_at` de hoje.
+    item_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    item_execution_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    item_user_action: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    item_last_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    item_next_auto_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    consent_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    item_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
