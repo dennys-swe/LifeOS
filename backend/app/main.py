@@ -11,6 +11,7 @@ from app.api.endpoints.cards import router as cards_router
 from app.api.endpoints.categories import router as categories_router
 from app.api.endpoints.category_rules import router as category_rules_router
 from app.api.endpoints.credit_card_bills import router as credit_card_bills_router
+from app.api.endpoints.data_quality import router as data_quality_router
 from app.api.endpoints.insights import router as insights_router
 from app.api.endpoints.jobs import router as jobs_router
 from app.api.endpoints.payables import router as payables_router
@@ -127,6 +128,7 @@ app.include_router(budgets_router)
 app.include_router(bank_accounts_router)
 app.include_router(credit_card_bills_router)
 app.include_router(cards_router)
+app.include_router(data_quality_router)
 app.include_router(push_subscriptions_router)
 app.include_router(jobs_router)
 app.include_router(webhooks_router)
