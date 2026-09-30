@@ -146,6 +146,15 @@ def get_connect_token(item_id: Optional[UUID] = None) -> str:
     return resp.access_token
 
 
+def _card_label(account_name: str | None, card_number: str | None) -> str | None:
+    """ "Itaú Click ••6920" quando a Pluggy manda o final; só o nome quando não."""
+    name = (account_name or "").strip()
+    last4 = str(card_number).strip()[-4:] if card_number else ""
+    if name and last4:
+        return f"{name} ••{last4}"[:120]
+    return name[:120] or None
+
+
 def _transaction_type(tx: dict) -> TransactionType:
     """Deriva INCOME/EXPENSE do campo `type` da Pluggy, não do sinal do valor.
 
@@ -460,7 +469,14 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                         skipped += 1
                         continue
 
-                    candidates.append({"tx": tx, "source_key": source_key})
+                    candidates.append(
+                        {
+                            "tx": tx,
+                            "source_key": source_key,
+                            "pluggy_account_id": pluggy_acct.id,
+                            "account_name": card_name,
+                        }
+                    )
                     existing_sources.add(source_key)
 
                 if page >= total_pages:
@@ -592,6 +608,8 @@ def sync_account(db: Session, account: BankAccount) -> dict:
             operation_type=(tx.get("operationType") or None),
             bill_id=(card_meta.get("billId") or None),
             classification_source=source_of_class,
+            card_label=_card_label(candidate.get("account_name"), card_meta.get("cardNumber")),
+            pluggy_account_id=candidate.get("pluggy_account_id"),
         )
         db.add(new_tx)
         new_transactions.append(new_tx)

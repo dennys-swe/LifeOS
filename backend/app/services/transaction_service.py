@@ -41,6 +41,7 @@ def get_transactions(
     category_id: Optional[UUID] = None,
     uncategorized: bool = False,
     include_transfers: bool = True,
+    card: Optional[str] = None,
     limit: Optional[int] = None,
     offset: int = 0,
 ) -> List[Transaction]:
@@ -68,6 +69,8 @@ def get_transactions(
         query = query.where(Transaction.category_id == category_id)
     if not include_transfers:
         query = query.where(Transaction.is_transfer.is_(False))
+    if card is not None:
+        query = query.where(Transaction.card_label == card)
 
     # `id` desempata: sem um critério estável, duas transações do mesmo dia
     # podem trocar de lugar entre páginas e sumir da paginação.

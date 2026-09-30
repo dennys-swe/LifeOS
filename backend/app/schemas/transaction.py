@@ -51,3 +51,4 @@ class TransactionResponse(TransactionBase):
     installment_number: Optional[int] = None
     installment_total: Optional[int] = None
     classification_source: Optional[str] = None
+    card_label: Optional[str] = None

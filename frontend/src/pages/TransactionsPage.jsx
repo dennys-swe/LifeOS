@@ -61,6 +61,7 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [hideTransfers, setHideTransfers] = useState(false);
+  const [cardFilter, setCardFilter] = useState("all");
   const [error, setError] = useState("");
   const [categoryPickerTxId, setCategoryPickerTxId] = useState(null);
 
@@ -115,8 +116,21 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
     return (categories ?? []).filter((c) => !c.kind || c.kind === wanted);
   };
 
+  const cardOptions = useMemo(
+    () => [...new Set(transactions.map((t) => t.card_label).filter(Boolean))].sort(),
+    [transactions],
+  );
+
+  // Filtro que não existe mais nas opções (troca de mês) é ignorado: o select
+  // some com <2 cartões e o usuário não teria como limpá-lo.
+  const activeCard = cardOptions.includes(cardFilter) ? cardFilter : "all";
+
   const filtered = useMemo(() => {
     let list = transactions;
+
+    if (activeCard !== "all") {
+      list = list.filter((t) => t.card_label === activeCard);
+    }
 
     if (typeFilter === "TRANSFERS") {
       list = list.filter((t) => t.is_transfer);
@@ -134,7 +148,7 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
       list = list.filter((t) => t.description.toLowerCase().includes(q));
     }
     return list.sort((a, b) => b.date.localeCompare(a.date));
-  }, [transactions, typeFilter, hideTransfers, search]);
+  }, [transactions, typeFilter, hideTransfers, search, activeCard]);
 
   const realExpensesSum = useMemo(
     () =>
@@ -215,6 +229,22 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
                 {f.label}
               </button>
             ))}
+
+            {cardOptions.length > 1 && (
+              <select
+                value={activeCard}
+                onChange={(e) => setCardFilter(e.target.value)}
+                aria-label="Filtrar por cartão"
+                className="rounded-full border border-slate-200/80 bg-white px-3 py-1.5 font-display text-xs font-bold text-slate-600 outline-none focus:border-emerald-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+              >
+                <option value="all">Todos os cartões</option>
+                {cardOptions.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            )}
 
             {typeFilter !== "TRANSFERS" && (
               <label className="ml-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500 cursor-pointer dark:text-slate-400">
@@ -309,6 +339,15 @@ export default function TransactionsPage({ month, year, onMonthChange }) {
                             />
                           )}
                         </span>
+
+                        {t.card_label && (
+                          <span
+                            title="Cartão/conta de origem"
+                            className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:border-slate-700 dark:text-slate-400"
+                          >
+                            {t.card_label}
+                          </span>
+                        )}
 
                         {t.external_category && !cat && (
                           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
