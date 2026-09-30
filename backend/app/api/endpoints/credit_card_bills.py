@@ -255,9 +255,14 @@ def debug_open_bills(
 def list_credit_card_bills(
     month: Optional[int] = None,
     year: Optional[int] = None,
+    pending_focus: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(current_active_user),
 ):
+    """`pending_focus=true` (dashboard): no mês atual, fatura paga dá lugar à
+    próxima do mesmo cartão. Exige `month` e `year`."""
+    if pending_focus and month is not None and year is not None:
+        return bill_service.list_bills_pending_focus(db, user.id, month, year)
     return bill_service.list_bills(db, user.id, month=month, year=year)
 
 

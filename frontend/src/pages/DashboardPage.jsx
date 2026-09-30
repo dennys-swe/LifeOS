@@ -120,7 +120,7 @@ export default function DashboardPage({ month, year, onMonthChange }) {
       await api.patch(`/credit-card-bills/${bill.id}`, { custom_card_name: newCustomName });
     } catch {
       api
-        .get("/credit-card-bills", { params: { month, year } })
+        .get("/credit-card-bills", { params: { month, year, pending_focus: true } })
         .then((r) => updateBills(() => r.data ?? []));
     }
   };
@@ -139,7 +139,7 @@ export default function DashboardPage({ month, year, onMonthChange }) {
       await api.patch(`/credit-card-bills/${bill.id}`, { custom_color_hex: color });
     } catch {
       api
-        .get("/credit-card-bills", { params: { month, year } })
+        .get("/credit-card-bills", { params: { month, year, pending_focus: true } })
         .then((r) => updateBills(() => r.data ?? []));
     }
   };

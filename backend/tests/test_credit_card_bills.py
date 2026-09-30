@@ -1088,3 +1088,101 @@ def test_debug_endpoint_reports_bills_and_simulation(
     assert card["ultima_fatura_ja_vencida"] == "2026-08-10"
     # simulado agora mostra o bug antigo (pegar a projeção), só pra comparação
     assert card["simulado_com_ultima_vencida"]["ultima_fatura_fechada"] == "2027-06-10"
+
+
+# --- dashboard: fatura paga dá lugar à próxima do cartão (mês atual) ---
+
+
+def _bill(db, user, acc_id, due, *, paid=None, total="100"):
+    """`paid=True/False` cria o Payable ligado; None = fatura sem payable."""
+    payable = None
+    if paid is not None:
+        payable = Payable(
+            user_id=user.id,
+            title="Fatura",
+            amount=Decimal(total),
+            due_date=due,
+            status=PayableStatus.PAID if paid else PayableStatus.PENDING,
+        )
+        db.add(payable)
+        db.commit()
+    account = _make_account(db, user)
+    bill = CreditCardBill(
+        user_id=user.id,
+        bank_account_id=account.id,
+        pluggy_account_id=acc_id,
+        external_id=str(uuid4()),
+        due_date=due,
+        total_amount=Decimal(total),
+        status=CreditCardBillStatus.CLOSED,
+        payable_id=payable.id if payable else None,
+    )
+    db.add(bill)
+    db.commit()
+    db.refresh(bill)
+    return bill
+
+
+def test_pending_focus_replaces_paid_bill_with_next_month(db_session, user):
+    today = date.today()
+    paga = _bill(db_session, user, "card-A", _in_window(10), paid=True)
+    proxima = _bill(db_session, user, "card-A", _in_window(10, months_ahead=1), paid=False)
+
+    result = bill_service.list_bills_pending_focus(db_session, user.id, today.month, today.year)
+
+    assert [b.id for b in result] == [proxima.id]
+    assert paga.id not in [b.id for b in result]
+
+
+def test_pending_focus_keeps_unpaid_and_other_cards(db_session, user):
+    today = date.today()
+    a = _bill(db_session, user, "card-A", _in_window(10), paid=True)
+    _bill(db_session, user, "card-A", _in_window(10, months_ahead=1), paid=False)
+    b = _bill(db_session, user, "card-B", _in_window(12), paid=False)
+
+    ids = {
+        x.id
+        for x in bill_service.list_bills_pending_focus(db_session, user.id, today.month, today.year)
+    }
+
+    assert b.id in ids  # cartão B não pago continua
+    assert a.id not in ids  # cartão A paga foi trocada
+
+
+def test_pending_focus_keeps_paid_when_no_next_bill(db_session, user):
+    today = date.today()
+    paga = _bill(db_session, user, "card-A", _in_window(10), paid=True)
+
+    result = bill_service.list_bills_pending_focus(db_session, user.id, today.month, today.year)
+
+    assert [b.id for b in result] == [paga.id]
+
+
+def test_pending_focus_only_applies_to_current_month(db_session, user):
+    today = date.today()
+    prev_year, prev_month = (
+        (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+    )
+    paga = _bill(db_session, user, "card-A", date(prev_year, prev_month, 10), paid=True)
+    _bill(db_session, user, "card-A", _in_window(10), paid=False)
+
+    result = bill_service.list_bills_pending_focus(db_session, user.id, prev_month, prev_year)
+
+    assert [b.id for b in result] == [paga.id]
+
+
+def test_endpoint_pending_focus_param(client, db_session, user):
+    today = date.today()
+    _bill(db_session, user, "card-A", _in_window(10), paid=True)
+    proxima = _bill(db_session, user, "card-A", _in_window(10, months_ahead=1), paid=False)
+
+    focused = client.get(
+        "/credit-card-bills",
+        params={"month": today.month, "year": today.year, "pending_focus": True},
+    ).json()
+    plain = client.get(
+        "/credit-card-bills", params={"month": today.month, "year": today.year}
+    ).json()
+
+    assert [b["id"] for b in focused] == [str(proxima.id)]
+    assert len(plain) == 1 and plain[0]["id"] != str(proxima.id)
