@@ -142,7 +142,22 @@ _INCOMING_TRANSFER_DESCRIPTION = re.compile(
 )
 
 # Palavras do texto da descrição que não são parte de nome de pessoa.
-_NON_NAME_TOKENS = {"PIX", "RECEBIDO", "RECEBIDA", "TRANSFERENCIA", "TED", "DOC", "CP"}
+_NON_NAME_TOKENS = {
+    "PIX",
+    "RECEBIDO",
+    "RECEBIDA",
+    "TRANSFERENCIA",
+    "TED",
+    "DOC",
+    "CP",
+    # Conectivos ("PIX RECEBIDO DE DENNYS", "Marcos da Silva"): não são nome.
+    "DE",
+    "DA",
+    "DO",
+    "DAS",
+    "DOS",
+    "E",
+}
 
 
 def _name_tokens(text: str) -> list[str]:
@@ -158,14 +173,16 @@ def is_self_transfer_description(description: str | None, user_full_name: str | 
     só o primeiro nome (`PIX RECEBIDO Dennys 04/09`) e às vezes o completo
     (`...-Dennys Alves Silva`) para quem cadastrou `Dennys Alves`. Vale se:
     (a) o nome cadastrado aparece inteiro e em sequência na descrição, ou
-    (b) o primeiro nome aparece e **todo** token de nome da descrição pertence
-    ao nome cadastrado. "Maria Silva" não casa só por dividir o sobrenome.
+    (b) a descrição traz **só** o primeiro nome do usuário.
+    Nome parcial que não seja só o primeiro ("Maria Silva" para quem cadastrou
+    "Maria Alves Silva") fica de fora de propósito: pode ser um parente, e
+    tratá-lo como transferência própria esconderia renda de verdade.
     """
     if not description or not user_full_name:
         return False
     if not _INCOMING_TRANSFER_DESCRIPTION.search(description):
         return False
-    user_tokens = _name_tokens(user_full_name)
+    user_tokens = [t for t in _name_tokens(user_full_name) if t not in _NON_NAME_TOKENS]
     if not user_tokens:
         return False
     described = [t for t in _name_tokens(description) if t not in _NON_NAME_TOKENS]
@@ -174,7 +191,7 @@ def is_self_transfer_description(description: str | None, user_full_name: str | 
     n = len(user_tokens)
     if any(described[i : i + n] == user_tokens for i in range(len(described) - n + 1)):
         return True
-    return user_tokens[0] in described and all(t in user_tokens for t in described)
+    return described == [user_tokens[0]]
 
 
 def is_transfer(

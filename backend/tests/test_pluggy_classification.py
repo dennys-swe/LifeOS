@@ -672,6 +672,22 @@ def test_nome_cadastrado_parcial_casa_com_nome_completo_do_banco():
     )
 
 
+def test_parente_com_primeiro_nome_e_sobrenome_iguais_continua_renda():
+    dono = "Maria Alves Silva"
+    assert not is_transfer(
+        None, "PIX RECEBIDO - Cp :1-Maria Silva", is_income=True, user_full_name=dono
+    )
+    assert is_transfer(None, "PIX RECEBIDO MARIA", is_income=True, user_full_name=dono)
+
+
+def test_conectivos_na_descricao_nao_quebram_a_deteccao():
+    for desc in ("PIX RECEBIDO DE DENNYS", "Transferência recebida de Dennys Alves"):
+        assert is_transfer(None, desc, is_income=True, user_full_name="Dennys Alves"), desc
+    assert is_transfer(
+        None, "PIX RECEBIDO Marcos da Silva", is_income=True, user_full_name="Marcos da Silva"
+    )
+
+
 def test_pix_recebido_de_terceiro_continua_renda():
     for desc in (
         "PIX RECEBIDO - Cp :123-Maria Silva",
