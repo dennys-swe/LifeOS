@@ -154,10 +154,12 @@ def _name_tokens(text: str) -> list[str]:
 def is_self_transfer_description(description: str | None, user_full_name: str | None) -> bool:
     """Entrada cujo remetente é o próprio usuário (PIX/TED entre contas suas).
 
-    O banco às vezes só manda o primeiro nome (`PIX RECEBIDO Dennys 04/09`),
-    então exige que o **primeiro nome** do usuário apareça e que **todo** token
-    de nome da descrição pertença ao nome dele — "Maria Silva" não vira
-    transferência própria só por dividir o sobrenome.
+    O cadastro e o banco raramente escrevem o nome igual: o banco às vezes manda
+    só o primeiro nome (`PIX RECEBIDO Dennys 04/09`) e às vezes o completo
+    (`...-Dennys Alves Silva`) para quem cadastrou `Dennys Alves`. Vale se:
+    (a) o nome cadastrado aparece inteiro e em sequência na descrição, ou
+    (b) o primeiro nome aparece e **todo** token de nome da descrição pertence
+    ao nome cadastrado. "Maria Silva" não casa só por dividir o sobrenome.
     """
     if not description or not user_full_name:
         return False
@@ -167,9 +169,12 @@ def is_self_transfer_description(description: str | None, user_full_name: str | 
     if not user_tokens:
         return False
     described = [t for t in _name_tokens(description) if t not in _NON_NAME_TOKENS]
-    if not described or user_tokens[0] not in described:
+    if not described:
         return False
-    return all(t in user_tokens for t in described)
+    n = len(user_tokens)
+    if any(described[i : i + n] == user_tokens for i in range(len(described) - n + 1)):
+        return True
+    return user_tokens[0] in described and all(t in user_tokens for t in described)
 
 
 def is_transfer(
