@@ -1,6 +1,7 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { Link } from "react-router";
 
+import CardLimitsCard from "../components/dashboard/CardLimitsCard";
 import CategorySpendList from "../components/dashboard/CategorySpendList";
 import InsightCard from "../components/dashboard/InsightCard";
 import MonthNavigator from "../components/MonthNavigator";
@@ -289,6 +290,8 @@ export default function DashboardPage({ month, year, onMonthChange }) {
             </div>
           </div>
         )}
+
+        <CardLimitsCard />
 
         {/* Super Efficient Grid: Gasto por Categoria + Faturas de Cartão */}
         <div className="grid gap-6 lg:grid-cols-5 items-start">
