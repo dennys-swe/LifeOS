@@ -18,6 +18,7 @@ from app.db.database import SessionLocal
 from app.models.bank_account import BankAccount, BankAccountSyncStatus
 from app.models.category import Category, CategoryKind
 from app.models.transaction import Transaction, TransactionType
+from app.models.user import User
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate
 from app.services import bill_service
 from app.services.category_rule_service import build_keyword_map
@@ -332,6 +333,9 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     # feeds antes de inserir (issue #32) — ver `_dedup_cross_feed_duplicates`.
     candidates: List[dict] = []
     keyword_map = build_keyword_map(db, account.user_id)
+    user_full_name = db.execute(
+        select(User.full_name).where(User.id == account.user_id)
+    ).scalar_one_or_none()
     # Garante que as categorias que o mapa da Pluggy referencia existem — quem
     # se registrou antes de "Saúde"/"Compras"/"Taxas"/"Seguros" entrarem no
     # DEFAULT_CATEGORIES ainda não as tem.
@@ -557,7 +561,13 @@ def sync_account(db: Session, account: BankAccount) -> dict:
             category_id=category_id,
             # A regra só liga is_transfer, nunca desliga (ver
             # `category_rule_service.apply_rule_to_existing`).
-            is_transfer=rule_is_transfer or is_transfer(pluggy_category, description),
+            is_transfer=rule_is_transfer
+            or is_transfer(
+                pluggy_category,
+                description,
+                is_income=(tx_type == TransactionType.INCOME),
+                user_full_name=user_full_name,
+            ),
             external_category=(pluggy_category or None),
         )
         db.add(new_tx)
