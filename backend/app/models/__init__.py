@@ -4,6 +4,7 @@ from app.models.budget import Budget
 from app.models.category import Category
 from app.models.category_rule import CategoryRule
 from app.models.credit_card_bill import CreditCardBill
+from app.models.data_quality_issue import DataQualityIssue
 from app.models.ignored_card import IgnoredCard
 from app.models.payable import Payable
 from app.models.push_subscription import PushSubscription
@@ -18,6 +19,7 @@ __all__ = [
     "Category",
     "CategoryRule",
     "CreditCardBill",
+    "DataQualityIssue",
     "IgnoredCard",
     "Payable",
     "PushSubscription",
