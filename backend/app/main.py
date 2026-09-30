@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from app.api.endpoints.bank_accounts import router as bank_accounts_router
 from app.api.endpoints.budgets import router as budgets_router
+from app.api.endpoints.cards import router as cards_router
 from app.api.endpoints.categories import router as categories_router
 from app.api.endpoints.category_rules import router as category_rules_router
 from app.api.endpoints.credit_card_bills import router as credit_card_bills_router
@@ -125,6 +126,7 @@ app.include_router(insights_router)
 app.include_router(budgets_router)
 app.include_router(bank_accounts_router)
 app.include_router(credit_card_bills_router)
+app.include_router(cards_router)
 app.include_router(push_subscriptions_router)
 app.include_router(jobs_router)
 app.include_router(webhooks_router)
