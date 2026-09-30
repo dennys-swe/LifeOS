@@ -210,22 +210,22 @@ def _normalize_purchase_description(description: Optional[str]) -> str:
 
 
 def _same_purchase_description(a: str, b: str) -> bool:
-    """Mesma compra? Igual, ou uma é prefixo da outra **em fronteira de palavra**.
+    """Mesma compra? Igual, ou uma é prefixo da outra (com ≥ 2 palavras no lado curto).
 
     O prefixo cobre o caso real do Itaú (#32): a mesma compra vem uma vez como
-    `POSTO CASARAO II` e outra como `POSTO CASARAO II CRATO BRA` (cidade/país
-    acrescentados). O antigo "uma contida na outra" (`a in b`) casava também
-    pedaço do meio e nome de uma palavra só (`UBER` engolindo `UBER EATS`), o
-    que podia descartar uma compra real como duplicata (#148). Exige ao menos 2
-    palavras no lado curto; com uma só, prefere manter as duas (duplicar é
-    reversível, apagar não).
+    `POSTO CASARAO II` e outra como `POSTO CASARAO II CRATO BRA` — ou com a
+    cidade **colada**, `POSTO CASARAO IICRATOBRA` (por isso não exige espaço). O
+    antigo "uma contida na outra" (`a in b`) casava também pedaço do meio e nome
+    de uma palavra só (`UBER` engolindo `UBER EATS`), o que podia descartar uma
+    compra real como duplicata (#148). Com uma palavra só, prefere manter as
+    duas (duplicar é reversível, apagar não) — ex: `NETFLIX` vs `NETFLIX BRA`.
     """
     if not a or not b:
         return False
     if a == b:
         return True
     short, long_ = (a, b) if len(a) <= len(b) else (b, a)
-    return len(short.split()) >= 2 and long_.startswith(short + " ")
+    return len(short.split()) >= 2 and long_.startswith(short)
 
 
 def _dedup_cross_feed_duplicates(candidates: List[dict]) -> tuple[List[dict], int]:

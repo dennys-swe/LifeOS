@@ -839,6 +839,7 @@ def test_same_purchase_description_rules():
     from app.services.bank_sync_service import _same_purchase_description as same
 
     assert same("POSTO CASARAO II", "POSTO CASARAO II CRATO BRA")  # cidade acrescentada (#32)
+    assert same("POSTO CASARAO II", "POSTO CASARAO IICRATOBRA")  # cidade colada
     assert same("METRO RJ RIO DE JANEIR BRA", "METRO RJ")
     assert same("BAIAOCOM CRATO", "BAIAOCOM CRATO")
     # antes casavam por "contido", agora não:
