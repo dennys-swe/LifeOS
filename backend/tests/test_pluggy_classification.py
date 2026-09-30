@@ -631,3 +631,60 @@ def test_bills_failure_does_not_swallow_transaction_sync(db_session, user):
 
     assert result["imported"] == 1
     assert db_session.query(Transaction).count() == 1
+
+
+# --- #172: lado de crédito (eco) de pagamento de fatura / transferência própria ---
+
+DONO = "Dennys Alves Silva"
+
+
+def test_eco_de_pagamento_de_fatura_na_entrada_nao_e_renda():
+    for desc in ("PAGAMENTO ON LINE", "PAGAMENTO COM SALDO"):
+        assert is_transfer(None, desc, is_income=True)
+
+
+def test_pagamento_com_saldo_de_saida_continua_sendo_gasto():
+    assert not is_transfer(None, "PAGAMENTO COM SALDO", is_income=False)
+
+
+def test_pix_recebido_do_proprio_usuario_e_transferencia():
+    for desc in (
+        "PIX RECEBIDO - Cp :18236120-Dennys Alves Silva",
+        "PIX RECEBIDO DENNYS 14/09",
+        "PIX RECEBIDO Dennys 04/09",
+        "Transferência Recebida|DENNYS ALVES SILVA",
+    ):
+        assert is_transfer(None, desc, is_income=True, user_full_name=DONO), desc
+
+
+def test_pix_recebido_de_terceiro_continua_renda():
+    for desc in (
+        "PIX RECEBIDO - Cp :123-Maria Silva",
+        "PIX RECEBIDO LARISSA",
+        "Transferência Recebida|DENNYS FERREIRA",
+        "SALARIO DENNYS ALVES SILVA",
+    ):
+        assert not is_transfer(None, desc, is_income=True, user_full_name=DONO), desc
+
+
+def test_sem_nome_do_usuario_nao_adivinha():
+    assert not is_transfer(None, "PIX RECEBIDO Dennys", is_income=True, user_full_name=None)
+
+
+def test_sync_nao_conta_eco_como_renda(db_session, user):
+    user.full_name = DONO
+    db_session.commit()
+    acc = _account(db_session, user)
+    _sync(
+        db_session,
+        acc,
+        [
+            _tx("a", 769.01, "PAGAMENTO ON LINE", tipo="CREDIT"),
+            _tx("b", 600.0, "Transferência Recebida|DENNYS ALVES SILVA", tipo="CREDIT"),
+            _tx("c", 50.0, "PIX RECEBIDO LARISSA", tipo="CREDIT"),
+        ],
+    )
+    by_desc = {t.description: t for t in db_session.query(Transaction).all()}
+    assert by_desc["PAGAMENTO ON LINE"].is_transfer
+    assert by_desc["Transferência Recebida|DENNYS ALVES SILVA"].is_transfer
+    assert not by_desc["PIX RECEBIDO LARISSA"].is_transfer

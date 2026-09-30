@@ -14,6 +14,7 @@ descobrir o que ficou de fora e completar o mapa depois.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 CREDIT_CARD_PAYMENT = "Credit card payment"
 
@@ -127,15 +128,71 @@ BILL_PAYMENT_DESCRIPTION = re.compile(r"pagamento\s+(de\s+)?fatura|fatura\s+paga
 _OVERDUE_BALANCE_ROLLOVER_DESCRIPTION = re.compile(r"saldo\s+em\s+atraso", re.IGNORECASE)
 
 
-def is_transfer(pluggy_category: str | None, description: str | None = None) -> bool:
+# Lado de **crédito** do pagamento de fatura: a Pluggy não marca esses ecos
+# como `Credit card payment` (só a saída), então entravam como renda. Só vale
+# para entrada — `PAGAMENTO COM SALDO` de saída é compra/pagamento de verdade.
+_INCOME_BILL_PAYMENT_ECHO_DESCRIPTION = re.compile(
+    r"pagamento\s+com\s+saldo|pagamento\s+on\s*-?\s*line", re.IGNORECASE
+)
+
+# Prefixos que a Pluggy/bancos põem antes do nome da contraparte numa entrada.
+_INCOMING_TRANSFER_DESCRIPTION = re.compile(
+    r"pix\s+recebido|transfer[eê]ncia\s+recebida|ted\s+recebid[ao]|doc\s+recebid[ao]",
+    re.IGNORECASE,
+)
+
+# Palavras do texto da descrição que não são parte de nome de pessoa.
+_NON_NAME_TOKENS = {"PIX", "RECEBIDO", "RECEBIDA", "TRANSFERENCIA", "TED", "DOC", "CP"}
+
+
+def _name_tokens(text: str) -> list[str]:
+    """Tokens alfabéticos maiúsculos e sem acento (dígitos/pontuação saem)."""
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return re.findall(r"[A-Z]{2,}", ascii_text.upper())
+
+
+def is_self_transfer_description(description: str | None, user_full_name: str | None) -> bool:
+    """Entrada cujo remetente é o próprio usuário (PIX/TED entre contas suas).
+
+    O banco às vezes só manda o primeiro nome (`PIX RECEBIDO Dennys 04/09`),
+    então exige que o **primeiro nome** do usuário apareça e que **todo** token
+    de nome da descrição pertença ao nome dele — "Maria Silva" não vira
+    transferência própria só por dividir o sobrenome.
+    """
+    if not description or not user_full_name:
+        return False
+    if not _INCOMING_TRANSFER_DESCRIPTION.search(description):
+        return False
+    user_tokens = _name_tokens(user_full_name)
+    if not user_tokens:
+        return False
+    described = [t for t in _name_tokens(description) if t not in _NON_NAME_TOKENS]
+    if not described or user_tokens[0] not in described:
+        return False
+    return all(t in user_tokens for t in described)
+
+
+def is_transfer(
+    pluggy_category: str | None,
+    description: str | None = None,
+    *,
+    is_income: bool = False,
+    user_full_name: str | None = None,
+) -> bool:
     if pluggy_category in TRANSFER_CATEGORIES:
         return True
     if not description:
         return False
-    return bool(
-        BILL_PAYMENT_DESCRIPTION.search(description)
-        or _OVERDUE_BALANCE_ROLLOVER_DESCRIPTION.search(description)
-    )
+    if BILL_PAYMENT_DESCRIPTION.search(description) or _OVERDUE_BALANCE_ROLLOVER_DESCRIPTION.search(
+        description
+    ):
+        return True
+    if is_income:
+        return bool(
+            _INCOME_BILL_PAYMENT_ECHO_DESCRIPTION.search(description)
+            or is_self_transfer_description(description, user_full_name)
+        )
+    return False
 
 
 # Ramo Income da Pluggy (`01xxxxxx`). Nunca esteve mapeado: sem destino de
