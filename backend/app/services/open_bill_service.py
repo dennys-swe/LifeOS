@@ -34,6 +34,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Iterable, Optional
 
+from app.services.pluggy_client import pluggy_amount
 from app.services.transaction_signals import is_card_feed_payment_credit
 
 # Categoria da Pluggy para quitação de fatura. O pagamento de uma fatura fica
@@ -42,13 +43,6 @@ from app.services.transaction_signals import is_card_feed_payment_credit
 # "MERCADINHO SAO LUIZ02/02" / "Expresso Guanabara 1/5" — o número da parcela
 # entra na descrição, então precisa sair para agrupar a mesma compra.
 _INSTALLMENT_SUFFIX = re.compile(r"\s*\d{1,2}\s*/\s*\d{1,2}\s*$")
-
-
-def _amount(tx: dict) -> Decimal:
-    """Valor em BRL. Compras em moeda estrangeira trazem o convertido à parte."""
-    converted = tx.get("amountInAccountCurrency")
-    raw = converted if converted is not None else tx.get("amount")
-    return Decimal(str(raw or 0))
 
 
 def _metadata(tx: dict) -> dict:
@@ -202,7 +196,7 @@ def explain_open_bill_amount(
     for tx in singles:
         bill_month = _bill_month(tx, last_closed_due_date, target_key, target_bill_id)
         if bill_month == target_key:
-            valor = _amount(tx)
+            valor = pluggy_amount(tx)
             total += valor
             linhas.append(_linha(tx, valor, True, "contou (competência do ciclo)"))
         else:
@@ -241,7 +235,7 @@ def _linha(tx: dict, valor: Decimal, contou: bool, motivo: str) -> dict:
     return {
         "descricao": tx.get("description"),
         "data": (tx.get("date") or "")[:10],
-        "valor_bruto": str(_amount(tx)),
+        "valor_bruto": str(pluggy_amount(tx)),
         "valor": str(valor.quantize(Decimal("0.01"))),
         "contou": contou,
         "motivo": motivo,
@@ -270,7 +264,7 @@ def _installment_detail(
     """
     for tx in group:
         if _bill_month(tx, last_closed_due_date, target_key, target_bill_id) == target_key:
-            return _amount(tx), "parcela deste ciclo (emitida pelo banco)", tx
+            return pluggy_amount(tx), "parcela deste ciclo (emitida pelo banco)", tx
 
     # Nenhuma transação para este ciclo: o banco ainda não emitiu a parcela.
     # Projeta a partir da mais recente conhecida, respeitando o total contratado.
@@ -292,7 +286,7 @@ def _installment_detail(
     number, count = _installment_parts(latest)
     if number + offset > count:
         return Decimal("0"), "parcelamento já quitado neste ciclo", None
-    return _amount(latest), f"parcela {number + offset}/{count} projetada", None
+    return pluggy_amount(latest), f"parcela {number + offset}/{count} projetada", None
 
 
 def next_due_date(last_closed_due_date: date, today: Optional[date] = None) -> date:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from decimal import Decimal
 
 import pluggy_sdk
 
@@ -34,3 +35,15 @@ def get_api_client() -> pluggy_sdk.ApiClient:
     client = pluggy_sdk.ApiClient(config)
     client.default_headers["X-API-KEY"] = _api_key
     return client
+
+
+def pluggy_amount(tx: dict) -> Decimal:
+    """Valor da transação **na moeda da conta (BRL)**, com o sinal da Pluggy.
+
+    Compra em moeda estrangeira traz o valor original em `amount` e o convertido
+    em `amountInAccountCurrency` — usar só `amount` gravava USD como se fosse
+    BRL (#146). Fonte única: sync, dedup e reconstrução da fatura em aberto.
+    """
+    converted = tx.get("amountInAccountCurrency")
+    raw = converted if converted is not None else tx.get("amount")
+    return Decimal(str(raw or 0))
