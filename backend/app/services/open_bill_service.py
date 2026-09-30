@@ -34,18 +34,11 @@ from datetime import date
 from decimal import Decimal
 from typing import Iterable, Optional
 
+from app.services.transaction_signals import is_card_feed_payment_credit
+
 # Categoria da Pluggy para quitação de fatura. O pagamento de uma fatura fica
 # registrado como transação da fatura **seguinte** — somá-lo zeraria o ciclo
 # novo em vez de abater o anterior.
-PAYMENT_CATEGORY_ID = "05100000"
-
-# Nem todo pagamento cai na categoria certa: "PAGAMENTO COM SALDO" (Itaú/Luiza)
-# vem como `Transfers`, mesma categoria de créditos legítimos que abatem a
-# fatura ("Encerramento de dívida"). A descrição é o que separa os dois.
-# Ancorado no início: "PAGAMENTO COM SALDO" / "Pagamento recebido" são quitação;
-# "JUROS PAGAMENTO CONTAS" é encargo e não pode ser excluído da fatura.
-_PAYMENT_DESCRIPTION = re.compile(r"^\s*PAGAMENTO\b", re.IGNORECASE)
-
 # "MERCADINHO SAO LUIZ02/02" / "Expresso Guanabara 1/5" — o número da parcela
 # entra na descrição, então precisa sair para agrupar a mesma compra.
 _INSTALLMENT_SUFFIX = re.compile(r"\s*\d{1,2}\s*/\s*\d{1,2}\s*$")
@@ -63,9 +56,7 @@ def _metadata(tx: dict) -> dict:
 
 
 def _is_payment(tx: dict) -> bool:
-    if tx.get("categoryId") == PAYMENT_CATEGORY_ID:
-        return True
-    return bool(_PAYMENT_DESCRIPTION.search(tx.get("description") or ""))
+    return is_card_feed_payment_credit(tx.get("categoryId"), tx.get("description"))
 
 
 def _month_key(value: date) -> str:
