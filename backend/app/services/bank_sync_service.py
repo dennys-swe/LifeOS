@@ -446,6 +446,23 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         .all()
     )
 
+    # Transações já importadas sem o selo de cartão (#184): o selo só era gravado em transação
+    # nova, então o histórico ficou sem ele. Como o sync relê o feed inteiro de qualquer jeito,
+    # o reencontro da transação vale para preencher o que falta, sem script avulso.
+    unlabeled: dict[str, Transaction] = {
+        tx.source: tx
+        for tx in db.execute(
+            select(Transaction).where(
+                Transaction.user_id == account.user_id,
+                Transaction.source.like("pluggy:%"),
+                Transaction.card_label.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    }
+    relabeled = 0
+
     with get_api_client() as ac:
         account_api = pluggy_sdk.AccountApi(ac)
         tx_api = pluggy_sdk.TransactionApi(ac)
@@ -545,6 +562,17 @@ def sync_account(db: Session, account: BankAccount) -> dict:
                     source_key = f"pluggy:{tx['id']}"
                     if source_key in existing_sources:
                         skipped += 1
+                        stale_tx = unlabeled.pop(source_key, None)
+                        if stale_tx is not None:
+                            label = _card_label(
+                                card_name, (tx.get("creditCardMetadata") or {}).get("cardNumber")
+                            )
+                            if label:
+                                stale_tx.card_label = label
+                                stale_tx.pluggy_account_id = (
+                                    stale_tx.pluggy_account_id or pluggy_acct.id
+                                )
+                                relabeled += 1
                         continue
 
                     candidates.append(
@@ -719,6 +747,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
     return {
         "imported": imported,
         "skipped": skipped,
+        "relabeled": relabeled,
         "bills_synced": bills_synced,
         "open_bills_synced": open_bills_synced,
         "retired_open_bills": retired_open_bills,
