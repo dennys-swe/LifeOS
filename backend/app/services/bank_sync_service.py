@@ -173,7 +173,7 @@ def _transaction_type(tx: dict) -> TransactionType:
         return TransactionType.INCOME
     # Sem `type` utilizável, cai no sinal — que é correto para conta corrente,
     # de onde vêm os extratos CSV e as contas sem esse campo.
-    return TransactionType.INCOME if (tx.get("amount") or 0) > 0 else TransactionType.EXPENSE
+    return TransactionType.INCOME if pluggy_amount(tx) > 0 else TransactionType.EXPENSE
 
 
 def _category_for_direction(
