@@ -317,6 +317,35 @@ def test_auto_reconcile_does_not_resolve_echo_when_both_generic(db_session, user
     assert p.status == PayableStatus.PENDING
 
 
+def test_auto_reconcile_treats_pagamento_on_line_as_generic_echo(db_session, user):
+    """`PAGAMENTO ON LINE` é eco genérico (#172/#167): não identifica a fatura,
+    então perde para o débito específico em vez de empatar com ele."""
+    p = _bill_payable(db_session, user, Decimal("655.34"), date(2026, 5, 10))
+    real_tx = Transaction(
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="FATURA PAGA CARTAO LUIZA",
+        amount=Decimal("655.34"),
+        type=TransactionType.EXPENSE,
+    )
+    echo_tx = Transaction(
+        user_id=user.id,
+        date=date(2026, 5, 10),
+        description="PAGAMENTO ON LINE",
+        amount=Decimal("655.34"),
+        type=TransactionType.EXPENSE,
+    )
+    db_session.add_all([real_tx, echo_tx])
+    db_session.commit()
+
+    suggestions = suggest_reconciliation(db_session, user.id, [real_tx, echo_tx])
+    confirmed = auto_reconcile_confident_matches(db_session, user.id, suggestions)
+
+    assert confirmed == [real_tx.id]
+    db_session.refresh(p)
+    assert p.status == PayableStatus.PAID
+
+
 # Cobertura de auto-reconciliação via CSV foi movida para o fluxo de sync da
 # Pluggy — ver test_bank_accounts.py::TestSyncAccountService (import de
 # extrato manual foi removido em favor de sincronização 100% automática).
