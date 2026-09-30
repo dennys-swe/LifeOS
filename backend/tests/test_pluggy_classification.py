@@ -830,3 +830,55 @@ def test_sync_grava_compra_internacional_em_brl(db_session, user):
     _sync(db_session, acc, [tx], account_type="CREDIT")
 
     assert db_session.query(Transaction).one().amount == Decimal("108.50")
+
+
+# --- #148: dedup por descrição estrito + log de auditoria ---
+
+
+def test_same_purchase_description_rules():
+    from app.services.bank_sync_service import _same_purchase_description as same
+
+    assert same("POSTO CASARAO II", "POSTO CASARAO II CRATO BRA")  # cidade acrescentada (#32)
+    assert same("POSTO CASARAO II", "POSTO CASARAO IICRATOBRA")  # cidade colada
+    assert same("METRO RJ RIO DE JANEIR BRA", "METRO RJ")
+    assert same("BAIAOCOM CRATO", "BAIAOCOM CRATO")
+    # antes casavam por "contido", agora não:
+    assert not same("UBER", "UBER EATS")  # uma palavra só
+    assert not same("LOJA CENTRO", "SUPER LOJA CENTRO NORTE")  # pedaço do meio
+    assert not same("PADARIA", "PADARIA SAO JOSE")
+    assert not same("", "X Y")
+
+
+def _cand(tx_id, desc, amount, day):
+    return {
+        "tx": {"id": tx_id, "description": desc, "amount": amount, "date": f"{day}T00:00:00Z"},
+        "source_key": f"pluggy:{tx_id}",
+    }
+
+
+def test_cross_feed_dedup_keeps_distinct_single_word_merchants():
+    from app.services.bank_sync_service import _dedup_cross_feed_duplicates
+
+    survivors, removed = _dedup_cross_feed_duplicates(
+        [_cand("a", "UBER", 25.0, "2026-08-10"), _cand("b", "UBER EATS", 25.0, "2026-08-11")]
+    )
+
+    assert removed == 0 and len(survivors) == 2
+
+
+def test_cross_feed_dedup_still_removes_city_suffix_duplicate_and_logs(caplog):
+    import logging
+
+    from app.services.bank_sync_service import _dedup_cross_feed_duplicates
+
+    with caplog.at_level(logging.WARNING, logger="app.services.bank_sync_service"):
+        survivors, removed = _dedup_cross_feed_duplicates(
+            [
+                _cand("a", "POSTO CASARAO II", 8.5, "2026-08-10"),
+                _cand("b", "POSTO CASARAO II CRATO BRA", 8.5, "2026-08-11"),
+            ]
+        )
+
+    assert removed == 1 and [c["tx"]["id"] for c in survivors] == ["a"]
+    log = " ".join(r.getMessage() for r in caplog.records)
+    assert "descartou candidato" in log and "id=b" in log and "id=a" in log
