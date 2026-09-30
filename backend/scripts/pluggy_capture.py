@@ -8,6 +8,7 @@ Para cada conta de cartão do item, cria
 
     transactions.json   # results achatados de transactions_list (todas as páginas)
     bills.json          # results de bills_list
+    accounts.json       # results crus de accounts_list do item (saldo, limite, creditData)
     capture.yaml        # metadados
     expected.yaml       # template — preencher com os valores reais de fatura
 
@@ -73,6 +74,14 @@ def capture(item_id: str, slug: str) -> None:
         bill_api = pluggy_sdk.BillApi(ac)
 
         accounts = account_api.accounts_list(item_id=item_id).results or []
+        # Cru (não o objeto do SDK): `creditData` e `bankData` são o que interessa
+        # e o SDK descarta/renomeia campos.
+        raw_accounts = (
+            json.loads(account_api.accounts_list_without_preload_content(item_id=item_id).data).get(
+                "results"
+            )
+            or []
+        )
         credit = [a for a in accounts if getattr(a, "type", None) == "CREDIT"]
         if not credit:
             print(f"item {item_id} não tem conta de cartão (type=CREDIT).")
@@ -90,6 +99,7 @@ def capture(item_id: str, slug: str) -> None:
                 json.dumps(transactions, indent=2, default=str)
             )
             (out_dir / "bills.json").write_text(json.dumps(bills, indent=2, default=str))
+            (out_dir / "accounts.json").write_text(json.dumps(raw_accounts, indent=2, default=str))
             (out_dir / "capture.yaml").write_text(
                 f'card: "{name}"\n'
                 f"source: real\n"
