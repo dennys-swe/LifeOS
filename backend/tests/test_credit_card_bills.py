@@ -1186,3 +1186,7 @@ def test_endpoint_pending_focus_param(client, db_session, user):
 
     assert [b["id"] for b in focused] == [str(proxima.id)]
     assert len(plain) == 1 and plain[0]["id"] != str(proxima.id)
+
+
+def test_endpoint_pending_focus_requires_month_and_year(client):
+    assert client.get("/credit-card-bills", params={"pending_focus": True}).status_code == 422

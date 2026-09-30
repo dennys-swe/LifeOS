@@ -261,7 +261,9 @@ def list_credit_card_bills(
 ):
     """`pending_focus=true` (dashboard): no mês atual, fatura paga dá lugar à
     próxima do mesmo cartão. Exige `month` e `year`."""
-    if pending_focus and month is not None and year is not None:
+    if pending_focus:
+        if month is None or year is None:
+            raise HTTPException(status_code=422, detail="pending_focus exige month e year.")
         return bill_service.list_bills_pending_focus(db, user.id, month, year)
     return bill_service.list_bills(db, user.id, month=month, year=year)
 

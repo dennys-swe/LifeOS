@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -39,6 +40,15 @@ def list_bills(
     return result.scalars().all()
 
 
+def _today_in_brazil() -> date:
+    """Hoje no fuso do usuário. O servidor roda em UTC: entre 21h e 23h59 do
+    último dia do mês ele já estaria no mês seguinte."""
+    try:
+        return datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    except ZoneInfoNotFoundError:  # sem tzdata no ambiente
+        return date.today()
+
+
 def list_bills_pending_focus(
     db: Session,
     user_id: UUID,
@@ -53,7 +63,7 @@ def list_bills_pending_focus(
     futuro o card continua sendo histórico/planejamento. Sem próxima fatura do
     mesmo cartão (ex: ainda não emitida), a paga continua aparecendo.
     """
-    today = today or date.today()
+    today = today or _today_in_brazil()
     bills = list_bills(db, user_id, month=month, year=year)
     if (month, year) != (today.month, today.year):
         return bills
