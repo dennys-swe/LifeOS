@@ -23,6 +23,7 @@ from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate
 from app.services import balance_snapshot_service, bill_service
 from app.services.category_rule_service import build_keyword_map
 from app.services.category_seed import seed_default_categories
+from app.services.connection_freshness import parse_pluggy_datetime
 from app.services.pluggy_category_map import (
     OVERRIDABLE_TRANSFER_CATEGORIES,
     TRANSFER_CATEGORIES,
@@ -371,6 +372,37 @@ def _dedup_against_existing(
     return survivors, removed
 
 
+def _apply_item_info(account: BankAccount, data: dict) -> None:
+    """Copia para a conexão o estado do item na Pluggy (#214)."""
+    account.item_status = data.get("status")
+    account.item_execution_status = data.get("executionStatus")
+    user_action = data.get("userAction")
+    account.item_user_action = str(user_action)[:80] if user_action else None
+    account.item_last_updated_at = parse_pluggy_datetime(data.get("lastUpdatedAt"))
+    account.item_next_auto_sync_at = parse_pluggy_datetime(data.get("nextAutoSyncAt"))
+    account.consent_expires_at = parse_pluggy_datetime(data.get("consentExpiresAt"))
+    account.item_checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _refresh_item_info(account: BankAccount, item_api, item_id: UUID) -> None:
+    """Lê o item na Pluggy e guarda a idade real do dado da conexão.
+
+    Acessório por contrato: falhar aqui (rede, timeout, item sumido) **não pode** derrubar o
+    sync de transações, então o erro é logado e os campos anteriores ficam como estavam. Mesmo
+    motivo do `except` amplo em `bills_list` mais abaixo. Usa o JSON cru para escapar da
+    validação Pydantic do SDK.
+    """
+    try:
+        raw = item_api.items_retrieve_without_preload_content(id=item_id)
+        data = json.loads(raw.data)
+        if not isinstance(data, dict):
+            raise ValueError("resposta do item não é um objeto")
+    except Exception as exc:
+        logger.warning("item indisponível (item=%s): %s", item_id, exc)
+        return
+    _apply_item_info(account, data)
+
+
 def sync_account(db: Session, account: BankAccount) -> dict:
     if not account.external_id:
         raise ValueError("Conta sem item_id da Pluggy. Conecte o banco primeiro.")
@@ -418,6 +450,8 @@ def sync_account(db: Session, account: BankAccount) -> dict:
         account_api = pluggy_sdk.AccountApi(ac)
         tx_api = pluggy_sdk.TransactionApi(ac)
         bill_api = pluggy_sdk.BillApi(ac)
+
+        _refresh_item_info(account, pluggy_sdk.ItemsApi(ac), item_id)
 
         pluggy_accounts = account_api.accounts_list(item_id=item_id).results or []
         seen_pluggy_account_ids: set[str] = set()

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import api from "../services/api";
 import ConfirmModal from "../components/ConfirmModal";
 import Card, { CardHeader } from "../components/ui/Card";
+import ConnectionFreshness from "../components/ui/ConnectionFreshness";
 import EmptyState from "../components/ui/EmptyState";
 import { fmt } from "../lib/format";
 import { useFinance } from "../context/FinanceContext";
@@ -344,8 +345,9 @@ export default function BankAccountsPage() {
                       <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">
                         {acc.type === "CREDIT" ? "Cartão de Crédito" : "Conta Corrente/Poupança"}
                         {acc.number && ` · final ${acc.number}`}
-                        {acc.last_sync_at && ` · Sincronizado ${new Date(acc.last_sync_at).toLocaleString("pt-BR")}`}
+                        {acc.last_sync_at && ` · Lido pelo LifeOS ${new Date(acc.last_sync_at).toLocaleString("pt-BR")}`}
                       </p>
+                      <ConnectionFreshness freshness={acc.freshness} />
                     </div>
                   </div>
 

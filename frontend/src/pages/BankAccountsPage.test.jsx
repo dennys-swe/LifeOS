@@ -313,3 +313,122 @@ describe("BankAccountsPage — revalidação por staleness (issue #116)", () => 
     expect(button.disabled).toBe(false);
   });
 });
+
+describe("BankAccountsPage — idade real do dado (issue #214)", () => {
+  const baseAccount = {
+    id: "acc-1",
+    name: "Inter + Cartão",
+    bank_name: "MeuPluggy",
+    account_type: "checking",
+    last_sync_at: "2026-09-30T16:38:51Z",
+  };
+
+  function mockWithAccount(freshness) {
+    api.get.mockImplementation((path) => {
+      if (path === "/bank-accounts") {
+        return Promise.resolve({ data: [{ ...baseAccount, freshness }] });
+      }
+      if (path === "/bank-accounts/reconciliation-suggestions") return Promise.resolve({ data: [] });
+      if (path === "/bank-accounts/acc-1/cards") return Promise.resolve({ data: [] });
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+  }
+
+  it("avisa que a conexão parou de atualizar mesmo com leitura recente do LifeOS", async () => {
+    mockWithAccount({
+      state: "stale",
+      reason: "no_auto_sync",
+      data_age_hours: 312,
+      auto_sync_scheduled: false,
+      consent_days_left: 300,
+      consent_expiring: false,
+    });
+    const { findByTestId, getByText } = renderPage();
+
+    const box = await findByTestId("connection-freshness");
+    expect(box.textContent).toContain("Desatualizada");
+    expect(box.textContent).toContain("Sem atualização há 13 dias");
+    expect(box.textContent).toContain("não está atualizando sozinho");
+    expect(getByText(/Lido pelo LifeOS/)).toBeTruthy();
+  });
+
+  it("mostra conexão atualizada em horas", async () => {
+    mockWithAccount({
+      state: "fresh",
+      reason: "ok",
+      data_age_hours: 10,
+      auto_sync_scheduled: true,
+      consent_days_left: 300,
+      consent_expiring: false,
+    });
+    const { findByTestId } = renderPage();
+
+    const box = await findByTestId("connection-freshness");
+    expect(box.textContent).toContain("Atualizada");
+    expect(box.textContent).toContain("há 10 h");
+    expect(box.textContent).not.toContain("vence em");
+  });
+
+  it("pede reconexão quando o banco precisa de atenção", async () => {
+    mockWithAccount({
+      state: "attention",
+      reason: "needs_attention",
+      data_age_hours: 5,
+      auto_sync_scheduled: false,
+      consent_days_left: 300,
+      consent_expiring: false,
+    });
+    const { findByTestId } = renderPage();
+
+    const box = await findByTestId("connection-freshness");
+    expect(box.textContent).toContain("Precisa de atenção");
+    expect(box.textContent).toContain("Reconecte");
+  });
+
+  it("avisa autorização perto de vencer e já vencida", async () => {
+    mockWithAccount({
+      state: "fresh",
+      reason: "ok",
+      data_age_hours: 2,
+      auto_sync_scheduled: true,
+      consent_days_left: 12,
+      consent_expiring: true,
+    });
+    const first = renderPage();
+    expect((await first.findByTestId("connection-freshness")).textContent).toContain("vence em 12 dias");
+    first.unmount();
+
+    mockWithAccount({
+      state: "fresh",
+      reason: "ok",
+      data_age_hours: 2,
+      auto_sync_scheduled: true,
+      consent_days_left: -3,
+      consent_expiring: true,
+    });
+    const second = renderPage();
+    expect((await second.findByTestId("connection-freshness")).textContent).toContain("autorização do banco venceu");
+  });
+
+  it("mostra estado neutro antes da primeira leitura do item", async () => {
+    mockWithAccount({
+      state: "unknown",
+      reason: "not_checked",
+      data_age_hours: null,
+      auto_sync_scheduled: false,
+      consent_days_left: null,
+      consent_expiring: false,
+    });
+    const { findByTestId } = renderPage();
+
+    expect((await findByTestId("connection-freshness")).textContent).toContain("Sem informação");
+  });
+
+  it("não quebra com conta sem o objeto de frescor (resposta antiga)", async () => {
+    mockWithAccount(undefined);
+    const { findByText, queryByTestId } = renderPage();
+
+    await findByText("Inter + Cartão");
+    expect(queryByTestId("connection-freshness")).toBeNull();
+  });
+});
