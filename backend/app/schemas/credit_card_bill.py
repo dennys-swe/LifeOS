@@ -27,6 +27,8 @@ class CreditCardBillResponse(BaseModel):
     allows_installments: Optional[bool]
     payable_id: Optional[UUID]
     status: CreditCardBillStatus
+    # Fatura em aberto com valor calculado que destoa da anterior — "confira".
+    is_low_confidence: bool = False
 
 
 class CreditCardBillUpdate(BaseModel):

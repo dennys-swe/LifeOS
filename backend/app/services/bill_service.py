@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -16,6 +17,8 @@ from app.models.credit_card_bill import CreditCardBill, CreditCardBillStatus
 from app.models.ignored_card import IgnoredCard
 from app.models.payable import Payable, PayableStatus
 from app.services import open_bill_service
+
+logger = logging.getLogger(__name__)
 
 
 def parse_pluggy_date(value: str) -> date:
@@ -352,6 +355,22 @@ def upsert_open_bill(
         transactions, target_due, closed.due_date, target_bill_id
     )
 
+    suspicion = open_bill_service.assess_open_bill_confidence(
+        Decimal(str(amount)),
+        Decimal(str(closed.total_amount)),
+        (today - closed.due_date).days,
+    )
+    if suspicion:
+        # Nível próprio (não o de "fatura indisponível"): valor calculado, mas fora
+        # do esperado contra a fatura anterior — vale investigar se virar padrão.
+        logger.warning(
+            "fatura em aberto com valor suspeito (%s): card=%s calculada=%s anterior=%s",
+            suspicion,
+            pluggy_account_id,
+            amount,
+            closed.total_amount,
+        )
+
     bill = db.execute(
         select(CreditCardBill).where(
             CreditCardBill.user_id == user_id,
@@ -386,11 +405,13 @@ def upsert_open_bill(
             due_date=target_due,
             total_amount=amount,
             status=CreditCardBillStatus.OPEN,
+            is_low_confidence=bool(suspicion),
         )
         db.add(bill)
     else:
         bill.due_date = target_due
         bill.total_amount = amount
+        bill.is_low_confidence = bool(suspicion)
         if card_name:
             bill.card_name = card_name
         bill.custom_card_name = closed.custom_card_name

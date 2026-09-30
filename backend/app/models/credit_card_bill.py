@@ -67,6 +67,12 @@ class CreditCardBill(Base):
     )
     minimum_payment_amount: Mapped[Numeric | None] = mapped_column(Numeric(12, 2), nullable=True)
     allows_installments: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Valor reconstruído por heurística que destoa muito da fatura anterior do
+    # mesmo cartão (ver `open_bill_service.assess_open_bill_confidence`). Sinal
+    # de "confira", não de erro: uma compra grande de verdade também dispara.
+    is_low_confidence: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     payable_id: Mapped[Uuid | None] = mapped_column(
         Uuid, ForeignKey("payables.id", ondelete="SET NULL"), nullable=True
     )
