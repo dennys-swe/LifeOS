@@ -210,9 +210,22 @@ def _normalize_purchase_description(description: Optional[str]) -> str:
 
 
 def _same_purchase_description(a: str, b: str) -> bool:
+    """Mesma compra? Igual, ou uma é prefixo da outra **em fronteira de palavra**.
+
+    O prefixo cobre o caso real do Itaú (#32): a mesma compra vem uma vez como
+    `POSTO CASARAO II` e outra como `POSTO CASARAO II CRATO BRA` (cidade/país
+    acrescentados). O antigo "uma contida na outra" (`a in b`) casava também
+    pedaço do meio e nome de uma palavra só (`UBER` engolindo `UBER EATS`), o
+    que podia descartar uma compra real como duplicata (#148). Exige ao menos 2
+    palavras no lado curto; com uma só, prefere manter as duas (duplicar é
+    reversível, apagar não).
+    """
     if not a or not b:
         return False
-    return a in b or b in a
+    if a == b:
+        return True
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short.split()) >= 2 and long_.startswith(short + " ")
 
 
 def _dedup_cross_feed_duplicates(candidates: List[dict]) -> tuple[List[dict], int]:
@@ -253,6 +266,17 @@ def _dedup_cross_feed_duplicates(candidates: List[dict]) -> tuple[List[dict], in
             if tx_date is None or kept_date is None or abs((tx_date - kept_date).days) > 2:
                 continue
             duplicate = True
+            logger.warning(
+                "dedup cross-feed descartou candidato como duplicata: "
+                "descartado=(id=%s %r %s valor=%s) mantido=(id=%s %r %s)",
+                tx.get("id"),
+                tx.get("description"),
+                tx_date,
+                amount,
+                kept_tx.get("id"),
+                kept_tx.get("description"),
+                kept_date,
+            )
             break
 
         if duplicate:
@@ -313,14 +337,29 @@ def _dedup_against_existing(
         description = _normalize_purchase_description(tx.get("description"))
         tx_date = bill_service.parse_pluggy_date(tx["date"]) if tx.get("date") else None
 
-        duplicate = tx_date is not None and any(
-            amount == ex_amount
-            and abs((tx_date - ex_date).days) <= 2
-            and _same_purchase_description(description, ex_description)
-            for ex_amount, ex_description, ex_date in existing_normalized
+        matched_existing = next(
+            (
+                (ex_description, ex_date)
+                for ex_amount, ex_description, ex_date in existing_normalized
+                if tx_date is not None
+                and amount == ex_amount
+                and abs((tx_date - ex_date).days) <= 2
+                and _same_purchase_description(description, ex_description)
+            ),
+            None,
         )
 
-        if duplicate:
+        if matched_existing is not None:
+            logger.warning(
+                "dedup contra existentes descartou candidato como duplicata: "
+                "descartado=(id=%s %r %s valor=%s) existente=(%r %s)",
+                tx.get("id"),
+                tx.get("description"),
+                tx_date,
+                amount,
+                matched_existing[0],
+                matched_existing[1],
+            )
             removed += 1
         else:
             survivors.append(candidate)
