@@ -58,8 +58,9 @@ SEVERITY = {
 
 # --- parâmetros ------------------------------------------------------------
 MIRROR_MAX_DAYS = 2
-# Valores pequenos coincidem à toa (R$ 5 sai e R$ 5 entra sem relação).
-MIN_MIRROR_AMOUNT = Decimal("10")
+# Valores pequenos coincidem à toa: na auditoria real de 30/09, 5 de 7 pares eram coincidência
+# (um gasto de R$ 12 e um Pix de R$ 12 recebido de terceiro), todos abaixo de R$ 50.
+MIN_MIRROR_AMOUNT = Decimal("50")
 LARGE_INCOME_MIN = Decimal("500")
 LARGE_INCOME_MEDIAN_FACTOR = 5
 DEFAULT_WINDOW_DAYS = 120
@@ -199,10 +200,12 @@ def detect_unlinked_reversals(txs: Iterable[TxView]) -> list[Finding]:
 def detect_unmarked_mirrors(
     txs: Iterable[TxView], skip_ids: frozenset[str] = frozenset()
 ) -> list[Finding]:
-    """Saída e entrada do mesmo valor em até 2 dias em que nem tudo está marcado como transferência.
+    """A saída já é transferência, mas a entrada de mesmo valor (até 2 dias) não é.
 
-    Pega o caso de `PAGAMENTO ON LINE` (lado do cartão) contado como renda enquanto a saída
-    espelho já era transferência. Pares em que os dois lados já estão marcados estão certos.
+    É o padrão que infla a renda: o sistema reconheceu o dinheiro saindo e deixou o mesmo
+    dinheiro entrando como receita. O inverso (entrada marcada, saída não) **não** é acusado:
+    é o caso normal de recarga por cartão e de gasto real pago com crédito liberado, que na
+    auditoria real de 30/09 dava falso positivo. Pares com os dois lados marcados estão certos.
     """
     out: list[Finding] = []
     used: set[str] = set(skip_ids)
@@ -215,6 +218,8 @@ def detect_unmarked_mirrors(
                 continue
             if expense.is_transfer and income.is_transfer:
                 used.update({expense.id, income.id})
+                continue
+            if not expense.is_transfer or income.is_transfer:
                 continue
             if _manual(expense) or _manual(income):
                 continue
@@ -302,7 +307,10 @@ def detect_all(txs: Sequence[TxView], user_full_name: Optional[str] = None) -> l
         f
         for f in findings
         if f.kind == SYSTEM_SAYS_TRANSFER
-        or not (f.kind == UNMARKED_MIRROR and flagged_high.intersection(f.transaction_ids))
+        or not (
+            f.kind in (UNMARKED_MIRROR, LARGE_UNUSUAL_INCOME)
+            and flagged_high.intersection(f.transaction_ids)
+        )
     ]
 
 

@@ -75,9 +75,9 @@ def test_ordinary_income_is_not_flagged():
 
 
 def test_self_transfer_income_uses_the_user_name():
-    tx = tv(580, "INCOME", "Transferência Recebida|DENNYS ALVES SILVA")
+    tx = tv(580, "INCOME", "Transferência Recebida|MARIA TITULAR SILVA")
 
-    assert dq.detect_system_says_transfer([tx], "Dennys Alves Silva")
+    assert dq.detect_system_says_transfer([tx], "Maria Titular Silva")
     assert dq.detect_system_says_transfer([tx], "Outra Pessoa") == []
 
 
@@ -125,7 +125,7 @@ def test_installment_credit_pairs_with_the_original_purchase():
 
 def test_mirror_with_one_side_unmarked_is_flagged():
     saida = tv(
-        914.53, "EXPENSE", "Transferência enviada|Dennys", transfer=True, dia=date(2026, 8, 12)
+        914.53, "EXPENSE", "Transferência enviada|Maria", transfer=True, dia=date(2026, 8, 12)
     )
     entrada = tv(914.53, "INCOME", "PAGAMENTO ON LINE", dia=date(2026, 8, 12))
 
@@ -143,7 +143,7 @@ def test_mirror_with_both_sides_marked_is_fine():
 
 
 def test_mirror_respects_the_two_day_window():
-    saida = tv(100, "EXPENSE", "Pix enviado", dia=date(2026, 9, 10))
+    saida = tv(100, "EXPENSE", "Pix enviado", transfer=True, dia=date(2026, 9, 10))
     perto = tv(100, "INCOME", "Pix recebido", dia=date(2026, 9, 12))
     longe = tv(100, "INCOME", "Pix recebido", dia=date(2026, 9, 13))
 
@@ -153,30 +153,88 @@ def test_mirror_respects_the_two_day_window():
 
 def test_mirror_needs_a_transfer_like_hint_in_the_description():
     """Mesmo valor e dia sem nada que lembre movimentação entre contas é coincidência."""
-    compra = tv(100, "EXPENSE", "MERCADINHO SAO LUIZ")
+    compra = tv(100, "EXPENSE", "MERCADINHO SAO LUIZ", transfer=True)
     venda = tv(100, "INCOME", "VENDA BALCAO")
     assert dq.detect_unmarked_mirrors([compra, venda]) == []
 
 
-def test_mirror_ignores_small_amounts():
-    assert (
-        dq.detect_unmarked_mirrors(
-            [tv(5, "EXPENSE", "Pix enviado"), tv(5, "INCOME", "Pix recebido")]
-        )
-        == []
-    )
+def test_mirror_ignores_amounts_below_the_minimum():
+    saida = tv(49.99, "EXPENSE", "Pix enviado", transfer=True)
+    assert dq.detect_unmarked_mirrors([saida, tv(49.99, "INCOME", "Pix recebido")]) == []
+
+    saida = tv(50, "EXPENSE", "Pix enviado", transfer=True)
+    assert len(dq.detect_unmarked_mirrors([saida, tv(50, "INCOME", "Pix recebido")])) == 1
 
 
 def test_mirror_skips_pairs_the_user_decided_manually():
-    saida = tv(100, "EXPENSE", "Pix enviado")
+    saida = tv(100, "EXPENSE", "Pix enviado", transfer=True)
     entrada = tv(100, "INCOME", "Pix recebido", source=ClassificationSource.MANUAL_OVERRIDE)
     assert dq.detect_unmarked_mirrors([saida, entrada]) == []
 
 
 def test_each_income_pairs_with_one_expense_only():
-    saidas = [tv(100, "EXPENSE", "Pix enviado"), tv(100, "EXPENSE", "Pix enviado")]
+    saidas = [
+        tv(100, "EXPENSE", "Pix enviado", transfer=True),
+        tv(100, "EXPENSE", "Pix enviado", transfer=True),
+    ]
     entrada = tv(100, "INCOME", "Pix recebido")
     assert len(dq.detect_unmarked_mirrors([*saidas, entrada])) == 1
+
+
+# ---------------------------------------------------------------------------
+# Falsos positivos reais da primeira auditoria (Ohio, 30/09/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_coincidental_amounts_with_a_third_party_are_not_mirrors():
+    """Gasto de R$ 12 e um Pix de R$ 12 recebido de terceiro no mesmo dia não são a mesma grana."""
+    compra = tv(12, "EXPENSE", "CONVENIENCIA POSTO CAS CRATO", dia=date(2026, 6, 24))
+    pix = tv(12, "INCOME", "Transferência Recebida|MARIA EXEMPLO DE SOUSA", dia=date(2026, 6, 24))
+    assert dq.detect_unmarked_mirrors([compra, pix]) == []
+
+
+def test_card_top_up_followed_by_a_real_expense_is_not_a_mirror():
+    """Recarga por cartão (entrada marcada como transferência) e o gasto que ela financiou."""
+    recarga = tv(35.84, "INCOME", "Valor adicionado na conta por cartão de crédito", transfer=True)
+    gasto = tv(35.84, "EXPENSE", "Transferência enviada|INGRESSO.COM LTDA")
+    assert dq.detect_unmarked_mirrors([recarga, gasto]) == []
+
+
+def test_marked_self_transfer_income_next_to_a_bet_deposit_is_not_a_mirror():
+    entrada = tv(20, "INCOME", "Transferência Recebida|MARIA TITULAR SILVA", transfer=True)
+    aposta = tv(20, "EXPENSE", "Transferência enviada|HS DO BRASIL LTDA.")
+    assert dq.detect_unmarked_mirrors([entrada, aposta]) == []
+
+
+def test_credit_released_for_pix_is_an_echo_not_income():
+    """Caso real: o cartão financiando um Pix chegou como renda (R$ 175,09)."""
+    tx = tv(175.09, "INCOME", "Crédito liberado para Pix Itaú Click M 0000")
+
+    (finding,) = dq.detect_system_says_transfer([tx])
+
+    assert finding.kind == dq.SYSTEM_SAYS_TRANSFER
+
+
+def test_card_top_up_credit_is_an_echo_even_with_decomposed_tilde():
+    composed = tv(35.84, "INCOME", "Valor adicionado na conta por cartão de crédito")
+    decomposed = tv(35.84, "INCOME", "Valor adicionado na conta por carta\u0303o de crédito")
+    assert len(dq.detect_system_says_transfer([composed, decomposed])) == 2
+
+
+def test_pix_paid_with_card_expense_is_real_spending_not_an_echo():
+    """O lado que sai (`Pix enviado com cartão`) é gasto de verdade; só a entrada é eco."""
+    assert (
+        dq.detect_system_says_transfer([tv(175.09, "EXPENSE", "Pix enviado com cartão ENEL")]) == []
+    )
+
+
+def test_echo_income_is_reported_once_not_also_as_large_income():
+    base = [tv(120, "INCOME", f"Pix recebido UBER {i}") for i in range(6)]
+    eco = tv(914.53, "INCOME", "PAGAMENTO COM SALDO", category_name="Outras receitas")
+
+    findings = dq.detect_all([*base, eco])
+
+    assert [f.kind for f in findings if eco.id in f.transaction_ids] == [dq.SYSTEM_SAYS_TRANSFER]
 
 
 # ---------------------------------------------------------------------------
@@ -314,8 +372,8 @@ def test_run_audit_only_looks_at_the_window_and_never_at_the_future(db_session, 
 
 
 def test_run_audit_reads_the_user_name_for_self_transfers(db_session, user):
-    user.full_name = "Dennys Alves"
-    add_tx(db_session, user, 580, "INCOME", "Transferência Recebida|DENNYS ALVES SILVA", dia=TODAY)
+    user.full_name = "Maria Titular"
+    add_tx(db_session, user, 580, "INCOME", "Transferência Recebida|MARIA TITULAR SILVA", dia=TODAY)
 
     result = dq.run_audit(db_session, user.id, today=TODAY)
 
