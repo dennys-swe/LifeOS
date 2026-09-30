@@ -24,7 +24,7 @@ from app.services import bill_service
 from app.services.category_rule_service import build_keyword_map
 from app.services.category_seed import seed_default_categories
 from app.services.pluggy_category_map import TRANSFER_CATEGORIES, category_name_for
-from app.services.pluggy_client import get_api_client
+from app.services.pluggy_client import get_api_client, pluggy_amount
 from app.services.reconciliation_service import (
     auto_reconcile_confident_matches,
     bill_payable_ids_for_user,
@@ -173,7 +173,7 @@ def _transaction_type(tx: dict) -> TransactionType:
         return TransactionType.INCOME
     # Sem `type` utilizável, cai no sinal — que é correto para conta corrente,
     # de onde vêm os extratos CSV e as contas sem esse campo.
-    return TransactionType.INCOME if (tx.get("amount") or 0) > 0 else TransactionType.EXPENSE
+    return TransactionType.INCOME if pluggy_amount(tx) > 0 else TransactionType.EXPENSE
 
 
 def _category_for_direction(
@@ -234,14 +234,14 @@ def _dedup_cross_feed_duplicates(candidates: List[dict]) -> tuple[List[dict], in
     removed = 0
     for candidate in candidates:
         tx = candidate["tx"]
-        amount = Decimal(str(tx.get("amount", 0) or 0))
+        amount = pluggy_amount(tx)
         description = _normalize_purchase_description(tx.get("description"))
         tx_date = bill_service.parse_pluggy_date(tx["date"]) if tx.get("date") else None
 
         duplicate = False
         for kept in survivors:
             kept_tx = kept["tx"]
-            if amount != Decimal(str(kept_tx.get("amount", 0) or 0)):
+            if amount != pluggy_amount(kept_tx):
                 continue
             if not _same_purchase_description(
                 description, _normalize_purchase_description(kept_tx.get("description"))
@@ -309,7 +309,7 @@ def _dedup_against_existing(
     removed = 0
     for candidate in candidates:
         tx = candidate["tx"]
-        amount = Decimal(str(tx.get("amount", 0) or 0))
+        amount = pluggy_amount(tx)
         description = _normalize_purchase_description(tx.get("description"))
         tx_date = bill_service.parse_pluggy_date(tx["date"]) if tx.get("date") else None
 
@@ -537,7 +537,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
 
     for candidate in candidates:
         tx = candidate["tx"]
-        amount_raw = tx.get("amount", 0) or 0
+        amount_raw = pluggy_amount(tx)
         tx_type = _transaction_type(tx)
         tx_date = (
             bill_service.parse_pluggy_date(tx["date"]) if tx.get("date") else date_type.today()
@@ -594,7 +594,7 @@ def sync_account(db: Session, account: BankAccount) -> dict:
             user_id=account.user_id,
             date=tx_date,
             description=description,
-            amount=Decimal(str(abs(amount_raw))),
+            amount=abs(amount_raw),
             type=tx_type,
             source=candidate["source_key"],
             category_id=category_id,

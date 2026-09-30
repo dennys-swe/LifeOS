@@ -808,3 +808,25 @@ def test_sync_grava_selo_de_cartao_por_final(db_session, user):
     assert by_desc["LOJA B"].card_label == "conta ••9420"
     assert by_desc["LOJA C"].card_label == "conta"
     assert by_desc["LOJA A"].pluggy_account_id == by_desc["LOJA C"].pluggy_account_id
+
+
+# --- #146: moeda estrangeira grava o valor em BRL ---
+
+
+def test_pluggy_amount_prefere_valor_convertido():
+    from app.services.pluggy_client import pluggy_amount
+
+    assert pluggy_amount({"amount": 20.0, "amountInAccountCurrency": 108.5}) == Decimal("108.5")
+    assert pluggy_amount({"amount": -20.0}) == Decimal("-20.0")
+    assert pluggy_amount({"amount": 5, "amountInAccountCurrency": 0}) == Decimal("0")
+    assert pluggy_amount({}) == Decimal("0")
+
+
+def test_sync_grava_compra_internacional_em_brl(db_session, user):
+    acc = _account(db_session, user)
+    tx = _tx("i1", 20.0, "AMAZON US", tipo="DEBIT")
+    tx["amountInAccountCurrency"] = 108.5
+    tx["currencyCode"] = "USD"
+    _sync(db_session, acc, [tx], account_type="CREDIT")
+
+    assert db_session.query(Transaction).one().amount == Decimal("108.50")
