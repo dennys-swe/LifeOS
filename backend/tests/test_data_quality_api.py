@@ -336,3 +336,63 @@ def test_user_cannot_see_preview_apply_or_dismiss_another_users_issue(
     assert client.post(f"/data-quality/issues/{theirs.id}/dismiss").status_code == 404
     db_session.refresh(theirs)
     assert theirs.status == "open"
+
+
+# --- limite e ordem --------------------------------------------------------
+
+
+def test_limit_keeps_the_most_severe_issues_even_when_they_are_older(db_session, user):
+    """`high` antigo não pode ser cortado pelo limite em favor de `info` recente."""
+    from datetime import datetime
+
+    from app.services import data_quality_actions as actions
+
+    def issue(kind, severity, age_days, key):
+        db_session.add(
+            DataQualityIssue(
+                user_id=user.id,
+                kind=kind,
+                severity=severity,
+                status="open",
+                fingerprint=key,
+                transaction_ids=[],
+                detail={},
+                detected_at=datetime(2026, 9, 30) - timedelta(days=age_days),
+            )
+        )
+
+    issue("system_says_transfer", "high", 30, "old-high")
+    issue("unmarked_mirror", "warn", 10, "mid-warn")
+    for n in range(3):
+        issue("uncategorized_expense", "info", n, f"new-info-{n}")
+    db_session.commit()
+
+    kept = actions.list_issues(db_session, user.id, limit=2)
+
+    assert [v.issue.severity for v in kept] == ["high", "warn"]
+
+
+def test_same_severity_is_ordered_newest_first(db_session, user):
+    from datetime import datetime
+
+    from app.services import data_quality_actions as actions
+
+    for age, key in ((5, "older"), (1, "newer")):
+        db_session.add(
+            DataQualityIssue(
+                user_id=user.id,
+                kind="uncategorized_expense",
+                severity="info",
+                status="open",
+                fingerprint=key,
+                transaction_ids=[],
+                detail={},
+                detected_at=datetime(2026, 9, 30) - timedelta(days=age),
+            )
+        )
+    db_session.commit()
+
+    assert [v.issue.fingerprint for v in actions.list_issues(db_session, user.id)] == [
+        "newer",
+        "older",
+    ]

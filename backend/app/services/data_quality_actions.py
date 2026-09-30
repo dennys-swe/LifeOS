@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import Optional, Sequence
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models.category import Category
@@ -139,12 +139,20 @@ def list_issues(
     )
     if severity:
         stmt = stmt.where(DataQualityIssue.severity == severity)
+    # Gravidade no SQL, antes do LIMIT: ordenar só depois em Python cortaria `high` antigos
+    # e deixaria `info` recentes quando houver mais achados abertos que o limite.
+    severity_rank = case(
+        (DataQualityIssue.severity == "high", 0),
+        (DataQualityIssue.severity == "warn", 1),
+        else_=2,
+    )
     issues = list(
-        db.execute(stmt.order_by(DataQualityIssue.detected_at.desc()).limit(limit)).scalars()
+        db.execute(
+            stmt.order_by(severity_rank, DataQualityIssue.detected_at.desc()).limit(limit)
+        ).scalars()
     )
 
     names = _category_names(db, user_id)
-    order = {"high": 0, "warn": 1, "info": 2}
     views = []
     for issue in issues:
         views.append(
@@ -156,7 +164,6 @@ def list_issues(
                 needs_category=issue.kind == dq.UNCATEGORIZED_EXPENSE,
             )
         )
-    views.sort(key=lambda v: (order.get(v.issue.severity, 9), -v.issue.detected_at.timestamp()))
     return views
 
 
