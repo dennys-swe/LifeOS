@@ -133,6 +133,7 @@ Cada item traz: escopo, design, testes, aceite, dependência e **modelo sugerido
 
 **B1 — Serviço de compromissos (linha do tempo) [dentro da #151]**
 - `commitments_service.get_timeline(user_id, horizon_days)` retorna itens datados: payables pendentes, faturas (aberta + futuras), recorrentes ainda não geradas, parcelas em conta.
+- **Fatura aberta já gera `Payable`** (`CreditCardBill` com `status=OPEN` tem payable PENDING atualizado a cada sync). Para a fatura **atual**, a fonte é o payable; somar payable e fatura aberta conta a mesma fatura duas vezes. Faturas futuras sem payable (fora da janela de criação) vêm do `CreditCardBill`/projeção.
 - **Risco principal: dupla contagem.** Parcela futura de cartão já está dentro da fatura futura (Itaú emite parcelas futuras como transações; Nubank só a do ciclo). Regra: para cartão, o compromisso é a **fatura**, nunca a parcela solta. `open_bill_service` já trata esse conflito; reutilizar.
 - Testes: um caso por banco com as fixtures existentes; parcela que aparece nas duas fontes conta uma vez; fatura de baixa confiança marcada como estimativa.
 - Modelo: Opus revisa (dinheiro, dupla contagem); Sonnet implementa.
