@@ -1,0 +1,46 @@
+[
+  {
+    "id": "acc-bank-1",
+    "itemId": "item-1",
+    "type": "BANK",
+    "subtype": "CHECKING_ACCOUNT",
+    "name": "Conta Corrente",
+    "balance": 0.0,
+    "currencyCode": "BRL",
+    "number": "0000",
+    "owner": "0000",
+    "taxNumber": "0000",
+    "bankData": {
+      "transferNumber": "0000",
+      "closingBalance": 0.0,
+      "automaticallyInvestedBalance": null,
+      "overdraftContractedLimit": 0,
+      "overdraftUsedLimit": 0,
+      "unarrangedOverdraftAmount": 0,
+      "hasReservedBalance": null,
+      "reservedBalances": null
+    }
+  },
+  {
+    "id": "acc-card-1",
+    "itemId": "item-1",
+    "type": "CREDIT",
+    "subtype": "CREDIT_CARD",
+    "name": "Titular",
+    "balance": 800.0,
+    "currencyCode": "BRL",
+    "number": "0000",
+    "creditData": {
+      "level": "GOLD",
+      "brand": "MASTERCARD",
+      "balanceCloseDate": null,
+      "balanceDueDate": "2026-10-12",
+      "availableCreditLimit": 1600.0,
+      "creditLimit": 2400.0,
+      "isLimitFlexible": false,
+      "status": "ACTIVE",
+      "disaggregatedCreditLimits": null,
+      "additionalCards": []
+    }
+  }
+]

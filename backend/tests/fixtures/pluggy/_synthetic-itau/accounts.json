@@ -1,0 +1,117 @@
+[
+  {
+    "id": "acc-bank-1",
+    "itemId": "item-1",
+    "type": "BANK",
+    "subtype": "CHECKING_ACCOUNT",
+    "name": "Conta Corrente",
+    "balance": 0.0,
+    "currencyCode": "BRL",
+    "number": "0000",
+    "owner": "0000",
+    "taxNumber": "0000",
+    "bankData": {
+      "transferNumber": "0000",
+      "closingBalance": 0.0,
+      "automaticallyInvestedBalance": null,
+      "overdraftContractedLimit": 100.0,
+      "overdraftUsedLimit": 0,
+      "unarrangedOverdraftAmount": 0,
+      "hasReservedBalance": null,
+      "reservedBalances": null
+    }
+  },
+  {
+    "id": "acc-card-1",
+    "itemId": "item-1",
+    "type": "CREDIT",
+    "subtype": "CREDIT_CARD",
+    "name": "Cartão compartilhado",
+    "balance": 0.0,
+    "currencyCode": "BRL",
+    "number": "0000",
+    "creditData": {
+      "level": "GOLD",
+      "brand": "MASTERCARD",
+      "balanceCloseDate": null,
+      "balanceDueDate": "2026-08-10",
+      "availableCreditLimit": 1300.0,
+      "creditLimit": 1300.0,
+      "isLimitFlexible": false,
+      "status": "ACTIVE",
+      "disaggregatedCreditLimits": [
+        {
+          "lineName": "CREDITO_A_VISTA",
+          "usedAmount": 0.0,
+          "limitAmount": 1300.0,
+          "availableAmount": 1300.0,
+          "isLimitFlexible": false,
+          "consolidationType": "CONSOLIDADO",
+          "creditLineLimitType": "LIMITE_CREDITO_TOTAL",
+          "identificationNumber": "0001"
+        },
+        {
+          "lineName": "CREDITO_A_VISTA",
+          "usedAmount": 0.0,
+          "limitAmount": 1300.0,
+          "availableAmount": 1300.0,
+          "isLimitFlexible": false,
+          "consolidationType": "CONSOLIDADO",
+          "creditLineLimitType": "LIMITE_CREDITO_TOTAL",
+          "identificationNumber": "0002"
+        },
+        {
+          "lineName": "CREDITO_A_VISTA",
+          "usedAmount": 0.0,
+          "limitAmount": 1300.0,
+          "availableAmount": 1300.0,
+          "isLimitFlexible": false,
+          "consolidationType": "CONSOLIDADO",
+          "creditLineLimitType": "LIMITE_CREDITO_TOTAL",
+          "identificationNumber": "0003"
+        }
+      ],
+      "additionalCards": [
+        {
+          "number": "0002"
+        },
+        {
+          "number": "0003"
+        }
+      ]
+    }
+  },
+  {
+    "id": "acc-card-2",
+    "itemId": "item-1",
+    "type": "CREDIT",
+    "subtype": "CREDIT_CARD",
+    "name": "Click Múltiplo",
+    "balance": 840.0,
+    "currencyCode": "BRL",
+    "number": "0000",
+    "creditData": {
+      "level": "GOLD",
+      "brand": "MASTERCARD",
+      "balanceCloseDate": null,
+      "balanceDueDate": "2026-08-10",
+      "availableCreditLimit": 60.0,
+      "creditLimit": 900.0,
+      "isLimitFlexible": false,
+      "status": "ACTIVE",
+      "disaggregatedCreditLimits": [
+        {
+          "lineName": "CREDITO_A_VISTA",
+          "usedAmount": 840.0,
+          "limitAmount": 900.0,
+          "availableAmount": 60.0,
+          "isLimitFlexible": false,
+          "consolidationType": "CONSOLIDADO",
+          "creditLineLimitType": "LIMITE_CREDITO_TOTAL",
+          "identificationNumber": "0004"
+        }
+      ],
+      "additionalCards": []
+    }
+  }
+]

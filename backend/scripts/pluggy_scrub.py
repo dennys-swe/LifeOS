@@ -27,6 +27,16 @@ from pathlib import Path
 
 _ID_KEYS = {"id", "billId", "accountId", "itemId", "bill_id", "account_id", "item_id"}
 
+# accounts.json: identificam a pessoa ou a conta e não importam para o teste.
+# Valores monetários (balance, creditLimit, ...) ficam como estão.
+_ACCOUNT_SENSITIVE_KEYS = {
+    "number",
+    "taxNumber",
+    "owner",
+    "transferNumber",
+    "identificationNumber",
+}
+
 # "PIX ENVIADO FULANO DE TAL", "TED RECEBIDA MARIA", "TRANSFERENCIA PARA JOAO"
 _COUNTERPARTY = re.compile(
     r"\b(PIX|TED|DOC|TRANSFERENCIA|TRANSFERÊNCIA)\b[\s\-]*"
@@ -67,6 +77,8 @@ class Scrubber:
                     if k in _ID_KEYS and isinstance(v, str) and v
                     else self.scrub_description(v)
                     if k in ("description", "descriptionRaw") and isinstance(v, str)
+                    else "0000"
+                    if k in _ACCOUNT_SENSITIVE_KEYS and isinstance(v, str) and v
                     else self.walk(v)
                 )
                 for k, v in node.items()
@@ -78,7 +90,7 @@ class Scrubber:
 
 def scrub_dir(path: Path, dry_run: bool) -> None:
     scrubber = Scrubber()
-    for name in ("transactions.json", "bills.json"):
+    for name in ("transactions.json", "bills.json", "accounts.json"):
         f = path / name
         if not f.is_file():
             continue
