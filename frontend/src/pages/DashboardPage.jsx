@@ -164,9 +164,18 @@ export default function DashboardPage({ month, year, onMonthChange }) {
     () => upcoming.reduce((s, p) => s + Number(p.amount), 0),
     [upcoming]
   );
+  // Só o que falta pagar: fatura cujo payable já está PAID sai da conta. As
+  // faturas trazidas do mês seguinte (`pending_focus`) não têm o payable na
+  // lista do mês atual, então contam como a pagar — que é o que são.
+  const pendingBills = useMemo(() => {
+    const paidPayableIds = new Set(
+      (payables ?? []).filter((p) => p.status === "PAID").map((p) => p.id)
+    );
+    return bills.filter((b) => !b.payable_id || !paidPayableIds.has(b.payable_id));
+  }, [bills, payables]);
   const billsSum = useMemo(
-    () => bills.reduce((s, b) => s + Number(b.total_amount), 0),
-    [bills]
+    () => pendingBills.reduce((s, b) => s + Number(b.total_amount), 0),
+    [pendingBills]
   );
 
   const paidCount = payablesThisMonth.filter((p) => p.status === "PAID").length;
@@ -421,13 +430,13 @@ export default function DashboardPage({ month, year, onMonthChange }) {
             </Card>
             <Card className="p-5">
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                Faturas do Mês
+                Faturas a pagar
               </p>
               <p className="mt-3 font-display text-2xl font-bold text-slate-900 dark:text-white">
                 {fmt(billsSum)}
               </p>
               <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
-                {bills.length} fatura{bills.length === 1 ? "" : "s"} sincronizada{bills.length === 1 ? "" : "s"}
+                {pendingBills.length} fatura{pendingBills.length === 1 ? "" : "s"} em aberto
               </p>
             </Card>
             <Card className="p-5">
