@@ -43,7 +43,7 @@ multidict==6.7.1
 packaging==26.2
 pluggy==1.6.0
 pluggy_sdk==1.0.0.post53
-propcache==0.5.2
+propcache==0.5.4
 psycopg2-binary==2.9.12
 pwdlib==0.3.0
 py-vapid==1.9.4
